@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pocket METAR Pro - Instructor Edition v3.2 (Case Insensitive)</title>
+    <title>Pocket METAR Pro - Instructor Edition v3.4 (ILS Fix)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; --text: #f8fafc; --dim: #94a3b8; --green: #4ade80; --red: #fb7185; --warn: #facc15; --orange: #fb923c; }
@@ -54,7 +54,11 @@
             </div>
             <select id="apSelect" onchange="document.getElementById('icaoInput').value=this.value; update()"></select>
         </div>
-        <div class="card"><span class="label-sm">原始電碼 RAW DATA</span><div id="rawView" class="raw-text">數據庫載入中...</div></div>
+        <div class="card">
+            <span class="label-sm">原始電碼 RAW DATA</span>
+            <div id="rawView" class="raw-text">數據庫載入中...</div>
+            <div id="debugLog" style="font-family:monospace; font-size:0.7rem; color:#94a3b8; margin-top:5px; white-space: pre-wrap; border-top:1px solid #334155; padding-top:5px;"></div>
+        </div>
         <div id="map"></div>
         <div class="card">
             <span class="label-sm">重點解譯 DECODER</span>
@@ -93,6 +97,11 @@
             </table>
         </div>
         <div class="card"><span class="label-sm">導航資料 NAV (ILS & VOR)</span><table class="nav-table"><tbody id="navDataTable"></tbody></table></div>
+        
+        <div class="card" id="allIlsCard" style="display:none">
+            <span class="label-sm" style="color:#facc15">偵錯：此機場所有可用導航</span>
+            <div id="allIlsList" style="font-size:0.8rem; font-family:monospace; color:#ccc;"></div>
+        </div>
     </div>
 </div>
 
@@ -122,13 +131,15 @@ const groups = [
 ];
 
 let navDataDB = {}, currentData = null, trafficSide = 'L', map, marker, patternOverlay;
+// 新增: 用來存該機場所有 Navaids，方便後續比對
+let currentAirportNavaids = [];
 
-function mhzToTacan(mhz) {
-    const f = parseFloat(mhz); if (isNaN(f)) return "";
-    let ch = "";
-    if (f >= 108.00 && f <= 111.95) ch = Math.round((f - 106.3) * 10) + "X";
-    else if (f >= 112.30 && f <= 117.95) ch = Math.round((f - 105.3) * 10) + "X";
-    return ch ? `(${ch})` : "";
+function logDebug(msg) {
+    const el = document.getElementById('debugLog');
+    if(el) {
+        el.innerText += msg + "\n";
+        console.log(msg);
+    }
 }
 
 const decodeMetarLogic = (raw) => {
@@ -142,86 +153,83 @@ const decodeMetarLogic = (raw) => {
     return d.length > 0 ? d.join('\n') : "無顯著天氣現象";
 };
 
-// 3. 數據庫讀取 (強制大寫比對，解決大小寫問題)
+// 3. 數據庫讀取
 async function ingestOurAirportsData() {
     try {
+        logDebug("正在讀取 CSV...");
         const [rRes, nRes] = await Promise.all([
             fetch('runways.csv').then(res => { if(!res.ok) throw new Error("Runways 404"); return res; }),
             fetch('navaids.csv').then(res => { if(!res.ok) throw new Error("Navaids 404"); return res; })
         ]);
         const rText = await rRes.text(), nText = await nRes.text();
-        const navMap = {}; 
+        
+        // --- NAVAIDS 解析 ---
+        const nLines = nText.split('\n');
+        const nHeaders = nLines[0].replace(/"/g,'').split(',');
+        
+        // 自動偵測欄位
+        const nIdx = {
+            ident: nHeaders.indexOf('ident'),
+            name: nHeaders.indexOf('name'),
+            type: nHeaders.indexOf('type'),
+            freq: nHeaders.indexOf('frequency_khz'),
+            airport: nHeaders.indexOf('associated_airport'),
+            filename: nHeaders.indexOf('filename') // 增加 filename 輔助比對
+        };
+        
+        // 如果自動偵測失敗，使用 OurAirports 標準預設值
+        if (nIdx.freq === -1 || nIdx.airport === -1) {
+            logDebug("警告: 欄位自動偵測失敗，切換至預設模式");
+            nIdx.ident = 2; nIdx.name = 3; nIdx.type = 4; nIdx.freq = 5; nIdx.airport = 19;
+        }
 
-        // 讀取 Navaids
-        nText.split('\n').slice(1).forEach(line => {
-            if (!line.trim()) return; 
+        // 我們不在此時做死板配對，而是將所有 Navaids 存入全域字典
+        const tempNavMap = {};
+        
+        nLines.slice(1).forEach(line => {
+            if (!line.trim()) return;
             const c = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
-            if (c.length < 19) return; 
-            
-            const ident = c[2].replace(/"/g,'').toUpperCase(); // 轉大寫
-            const type = c[4].toUpperCase(); // 轉大寫
-            const freqRaw = parseFloat(c[5]);
-            const icao = c[19].toUpperCase().replace(/"/g,'').trim(); // 轉大寫
-            const name = c[3].replace(/"/g,'').toUpperCase(); // 名稱也轉大寫，方便後續比對
-            
-            if (!freqRaw) return; 
+            if (c.length < 5) return;
+
+            const icao = c[nIdx.airport] ? c[nIdx.airport].replace(/"/g,'').toUpperCase().trim() : "";
+            if (!icao) return;
+
+            const ident = c[nIdx.ident] ? c[nIdx.ident].replace(/"/g,'').toUpperCase() : "";
+            const name = c[nIdx.name] ? c[nIdx.name].replace(/"/g,'').toUpperCase() : "";
+            const type = c[nIdx.type] ? c[nIdx.type].toUpperCase() : "";
+            const filename = (nIdx.filename > -1 && c[nIdx.filename]) ? c[nIdx.filename].replace(/"/g,'').toUpperCase() : "";
+            const freqRaw = parseFloat(c[nIdx.freq]);
+
+            if (!freqRaw) return;
             const freq = (freqRaw > 500) ? (freqRaw / 1000).toFixed(2) : freqRaw.toFixed(2);
-            
-            if (!navMap[icao]) navMap[icao] = [];
-            navMap[icao].push({ ident, type, freq, name });
+
+            if (!tempNavMap[icao]) tempNavMap[icao] = [];
+            tempNavMap[icao].push({ ident, type, freq, name, filename });
         });
+        
+        // 存到全域變數，供 refreshTab2 使用
+        navDataDB = tempNavMap;
+        
+        // --- RUNWAYS 解析 (僅用來確認跑道存在，不做預配對) ---
+        // 這裡我們不需要太複雜，因為跑道清單已由 airportDB (Tab 1) 控制
+        // 但為了確認 CSV 讀取成功，我們統計一下
+        document.getElementById('rawView').innerText = "數據庫 (CSV) 已載入完成。\nNavaids: OK";
+        logDebug(`資料庫索引建立完成。RCTP 有 ${tempNavMap['RCTP']?.length || 0} 個導航設施。`);
 
-        // 讀取 Runways
-        rText.split('\n').slice(1).forEach(line => {
-            if (!line.trim()) return; 
-            const c = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
-            if (c.length < 18) return;
-            
-            const icao = c[2].replace(/"/g,'').toUpperCase().trim();
-            if (!navDataDB[icao]) navDataDB[icao] = {};
-
-            [ {id: c[8], hdg: c[12]}, {id: c[14], hdg: c[18]} ].forEach(end => {
-                const rId = end.id ? end.id.replace(/"/g,'').trim().toUpperCase() : ""; // 跑道號轉大寫
-                if (!rId) return;
-                
-                const airportNavs = navMap[icao] || [];
-                const crs = end.hdg ? Math.round(parseFloat(end.hdg.replace(/"/g,''))).toString().padStart(3,'0') : rId.replace(/\D/g,'').padStart(2,'0')+"0";
-
-                // VOR 查找 (寬鬆比對：只要類型包含 VOR 即可)
-                let vorMatch = airportNavs.find(n => n.type.includes('VOR'));
-
-                // ILS 查找 (分層比對，增加命中率)
-                // 1. 名稱包含跑道 (如 "ILS 05L")
-                let ilsMatch = airportNavs.find(n => 
-                    (n.type.includes('ILS') || n.type.includes('LOC')) && 
-                    n.name.includes(rId)
-                );
-                
-                // 2. 如果沒找到，嘗試用數字比對 (如找 "05L" 但資料只有 "05")
-                if (!ilsMatch) {
-                    const rNum = rId.replace(/\D/g, ''); // 取出數字部分
-                    ilsMatch = airportNavs.find(n => 
-                        (n.type.includes('ILS') || n.type.includes('LOC')) && 
-                        n.name.includes(rNum)
-                    );
-                }
-
-                navDataDB[icao][rId] = {
-                    vor: vorMatch ? { ...vorMatch, crs: crs } : null,
-                    ils: ilsMatch ? { ...ilsMatch, crs: crs } : null
-                };
-            });
-        });
-        document.getElementById('rawView').innerText = "數據庫 (CSV) 已載入完成。";
     } catch (e) { 
         console.error(e);
-        document.getElementById('rawView').innerText = "數據庫載入失敗: " + e.message;
+        document.getElementById('rawView').innerText = "數據庫載入失敗";
+        logDebug("Critical Error: " + e.message);
     }
 }
 
 function update() {
     const id = document.getElementById('icaoInput').value.toUpperCase(); if (!id) return;
     const ap = airportDB[id] || { name: id, lat: 25.07, lon: 121.23, rwys: {} };
+    
+    // 更新全域當前機場導航列表
+    currentAirportNavaids = navDataDB[id] || [];
+    
     fetch(`https://metar.vatsim.net/metar.php?id=${id}&t=${Date.now()}`).then(r => r.text()).then(raw => {
         document.getElementById('rawView').innerText = raw.trim();
         
@@ -257,62 +265,111 @@ function update() {
 
 function refreshTab2() {
     if(!currentData) return; 
-    const r = document.getElementById('tab2Rwy').value, ap = airportDB[currentData.id];
-    const tas = parseInt(document.getElementById('tasInput').value) || 90;
-    const magH = (ap && ap.rwys[r]) ? ap.rwys[r].mag : parseInt(r)*10;
     
-    document.getElementById('rwyBar').style.transform = `translate(-50%, -50%) rotate(${magH-90}deg)`;
-    document.getElementById('n1').innerText = r; document.getElementById('n2').innerText = (parseInt(r)>18?parseInt(r)-18:parseInt(r)+18).toString().padStart(2,'0');
-    document.getElementById('windPtr').style.transform = `translate(-50%, -50%) rotate(${currentData.dir}deg)`;
-    
-    const legs = [{n:"Upwind", t:magH}, {n:"Cross", t:(magH+(trafficSide==='L'?-90:90)+360)%360}, {n:"Downwind", t:(magH+180)%360}, {n:"Base", t:(magH+(trafficSide==='L'?90:-90)+360)%360}];
-    let h = ""; legs.forEach(l => {
-        const a = (currentData.dir - l.t) * Math.PI / 180;
-        let wRad = Math.asin((currentData.spd * Math.sin(a)) / tas); if(isNaN(wRad)) wRad = 0;
-        const wDeg = Math.round(wRad * 180 / Math.PI);
-        const gs = Math.round(tas * Math.cos(wRad) + currentData.spd * Math.cos(a));
-        h += `<tr><td align="left"><b>${l.n}</b></td><td>${Math.round(l.t)}°</td><td>${wDeg>=0?'+':''}${wDeg}°</td><td><b>${((Math.round(l.t)+wDeg+360)%360).toString().padStart(3,'0')}°</b></td><td align="right" style="color:var(--accent)">${gs}KT</td></tr>`;
-    }); 
-    document.getElementById('wcaList').innerHTML = h;
+    // --- WCA 計算 ---
+    try {
+        const r = document.getElementById('tab2Rwy').value;
+        const ap = airportDB[currentData.id];
+        const tas = parseInt(document.getElementById('tasInput').value) || 90;
+        const magH = (ap && ap.rwys[r]) ? ap.rwys[r].mag : parseInt(r)*10;
+        
+        document.getElementById('rwyBar').style.transform = `translate(-50%, -50%) rotate(${magH-90}deg)`;
+        document.getElementById('n1').innerText = r; document.getElementById('n2').innerText = (parseInt(r)>18?parseInt(r)-18:parseInt(r)+18).toString().padStart(2,'0');
+        document.getElementById('windPtr').style.transform = `translate(-50%, -50%) rotate(${currentData.dir}deg)`;
+        
+        const legs = [{n:"Upwind", t:magH}, {n:"Cross", t:(magH+(trafficSide==='L'?-90:90)+360)%360}, {n:"Downwind", t:(magH+180)%360}, {n:"Base", t:(magH+(trafficSide==='L'?90:-90)+360)%360}];
+        let h = ""; legs.forEach(l => {
+            const a = (currentData.dir - l.t) * Math.PI / 180;
+            let wRad = Math.asin((currentData.spd * Math.sin(a)) / tas); if(isNaN(wRad)) wRad = 0;
+            const wDeg = Math.round(wRad * 180 / Math.PI);
+            const gs = Math.round(tas * Math.cos(wRad) + currentData.spd * Math.cos(a));
+            h += `<tr><td align="left"><b>${l.n}</b></td><td>${Math.round(l.t)}°</td><td>${wDeg>=0?'+':''}${wDeg}°</td><td><b>${((Math.round(l.t)+wDeg+360)%360).toString().padStart(3,'0')}°</b></td><td align="right" style="color:var(--accent)">${gs}KT</td></tr>`;
+        }); 
+        document.getElementById('wcaList').innerHTML = h;
+    } catch(e) { console.error("WCA Error:", e); }
 
-    // NAV 資料顯示 (分開處理，避免全無)
-    let nav = { vor: null, ils: null };
-    // 嘗試精確匹配
-    if (navDataDB[currentData.id] && navDataDB[currentData.id][r]) {
-        nav = navDataDB[currentData.id][r];
-    } else {
-        // Fallback: 嘗試模糊比對 (例如 CSV 只有 "05" 但我們要找 "05L")
-        if (navDataDB[currentData.id]) {
-            let shortR = r.replace(/\D/g, ''); // "05L" -> "05"
-            // 遍歷該機場所有跑道，找數字相同的
-            for (let k in navDataDB[currentData.id]) {
-                if (k.includes(shortR)) {
-                    nav = navDataDB[currentData.id][k];
-                    break;
-                }
-            }
-        }
+    // --- NAV Data Logic (即時配對) ---
+    const rId = document.getElementById('tab2Rwy').value; // e.g., "05L"
+    const rIdClean = rId.replace(/\D/g, ''); // "05"
+    
+    // 找出所有此機場的 Navs
+    const navs = currentAirportNavaids;
+    
+    // 1. VOR 搜尋 (最寬鬆)
+    const vor = navs.find(n => n.type.includes('VOR'));
+
+    // 2. ILS 搜尋 (多重條件比對)
+    // 優先順序: 
+    // A. 名稱包含完整跑道號 (05L)
+    // B. 名稱包含數字 (05) 且若有 L/R 也要對應
+    // C. 只有數字 (05)
+    
+    let ils = null;
+    const isLeft = rId.includes('L');
+    const isRight = rId.includes('R');
+    
+    // 篩選出所有 ILS 類型
+    const allILS = navs.filter(n => n.type.includes('ILS') || n.type.includes('LOC'));
+    
+    // 策略 A: 精確比對 (05L)
+    ils = allILS.find(n => n.name.includes(rId) || n.ident.includes(rId) || n.filename.includes(rId));
+    
+    // 策略 B: 數字比對 + 左右確認 (針對 CSV 寫法不同的情況)
+    if (!ils) {
+        ils = allILS.find(n => {
+            const hasNum = n.name.includes(rIdClean) || n.ident.includes(rIdClean);
+            if (!hasNum) return false;
+            // 如果我們要找 L，確認名稱裡也有 L (簡單防呆)
+            if (isLeft && n.name.includes('L')) return true;
+            if (isRight && n.name.includes('R')) return true;
+            if (!isLeft && !isRight) return true;
+            return false;
+        });
     }
 
+    // 策略 C: 僅數字比對 (最後手段)
+    if (!ils) {
+        ils = allILS.find(n => n.name.includes(rIdClean));
+    }
+
+    // --- 顯示 HTML ---
     let navHtml = "";
-    if (nav.vor) {
+    const crs = (airportDB[currentData.id] && airportDB[currentData.id].rwys[rId]) ? airportDB[currentData.id].rwys[rId].mag : rIdClean+"0";
+
+    if (vor) {
         navHtml += `
             <tr style="background:rgba(255, 255, 255, 0.05);"><td colspan="2" style="padding:4px 5px; color:var(--orange); font-size:0.8rem;">● VOR / TACAN</td></tr>
-            <tr><td>${nav.vor.ident} (${nav.vor.type})</td><td align="right" class="val">${nav.vor.freq} MHz</td></tr>
-            <tr><td style="border-bottom:2px solid #334155">Inbound Crs</td><td align="right" class="val" style="border-bottom:2px solid #334155">${nav.vor.crs}°</td></tr>
+            <tr><td>${vor.ident} (${vor.type})</td><td align="right" class="val">${vor.freq} MHz</td></tr>
+            <tr><td style="border-bottom:2px solid #334155">Inbound Crs</td><td align="right" class="val" style="border-bottom:2px solid #334155">${vor.ident === 'TIA' ? '052' : crs}°</td></tr>
         `;
     }
-    if (nav.ils) {
+    if (ils) {
         navHtml += `
             <tr style="background:rgba(56, 189, 248, 0.1);"><td colspan="2" style="padding:4px 5px; color:var(--accent); font-size:0.8rem;">● ILS APPROACH</td></tr>
-            <tr><td>${nav.ils.ident} (${nav.ils.type})</td><td align="right" class="val">${nav.ils.freq} MHz</td></tr>
-            <tr><td>LOC Course</td><td align="right" class="val">${nav.ils.crs}°</td></tr>
+            <tr><td>${ils.ident} (${ils.type})</td><td align="right" class="val">${ils.freq} MHz</td></tr>
+            <tr><td>LOC Course</td><td align="right" class="val">${crs}°</td></tr>
         `;
     }
-    if (!nav.vor && !nav.ils) {
-        navHtml = `<tr><td colspan="2" align="center" style="padding:20px; color:var(--dim)">無導航資料</td></tr>`;
+    
+    if (!vor && !ils) {
+        navHtml = `<tr><td colspan="2" align="center" style="padding:20px; color:var(--dim)">無符合的導航資料</td></tr>`;
     }
     document.getElementById('navDataTable').innerHTML = navHtml;
+
+    // --- 偵錯顯示區 (把所有找到的 ILS 列出來給使用者看) ---
+    const allIlsList = document.getElementById('allIlsList');
+    const allIlsCard = document.getElementById('allIlsCard');
+    if (navs.length > 0) {
+        allIlsCard.style.display = 'block';
+        let dbgHtml = "";
+        navs.filter(n => n.type.includes('ILS') || n.type.includes('LOC')).forEach(n => {
+            dbgHtml += `[${n.ident}] ${n.freq} - ${n.name}\n`;
+        });
+        if (dbgHtml === "") dbgHtml = "此機場 CSV 中無 ILS 資料";
+        allIlsList.innerText = dbgHtml;
+    } else {
+        allIlsCard.style.display = 'none';
+    }
 }
 
 function transfer() {
