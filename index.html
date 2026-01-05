@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pocket METAR Pro - Instructor Edition v2.9 (CSV Fixed)</title>
+    <title>Pocket METAR Pro - Instructor Edition v3.1 (CSV Fix)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; --text: #f8fafc; --dim: #94a3b8; --green: #4ade80; --red: #fb7185; --warn: #facc15; --orange: #fb923c; }
@@ -142,7 +142,7 @@ const decodeMetarLogic = (raw) => {
     return d.length > 0 ? d.join('\n') : "無顯著天氣現象";
 };
 
-// 3. 數據庫讀取 (保留 CSV Fetch, 但加強空值判斷以防崩潰)
+// 3. 數據庫讀取 (修正 Matching 邏輯與空值保護)
 async function ingestOurAirportsData() {
     try {
         const [rRes, nRes] = await Promise.all([
@@ -154,17 +154,18 @@ async function ingestOurAirportsData() {
 
         // 讀取 Navaids
         nText.split('\n').slice(1).forEach(line => {
-            if (!line.trim()) return; // 防呆: 跳過空行
+            if (!line.trim()) return; 
             const c = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
-            if (c.length < 19) return; // 確保欄位足夠 (OurAirports 至少19欄)
+            if (c.length < 19) return; 
             
             const ident = c[2].replace(/"/g,'');
             const type = c[4];
             const freqRaw = parseFloat(c[5]);
+            // OurAirports Navaids 第19欄是 associated_airport (ICAO)
             const icao = c[19].toUpperCase().replace(/"/g,'').trim();
-            const name = c[3];
+            const name = c[3].replace(/"/g,''); // 移除名稱的引號
             
-            if (!freqRaw) return; // 跳過無頻率資料
+            if (!freqRaw) return; 
             const freq = (freqRaw > 500) ? (freqRaw / 1000).toFixed(2) : freqRaw.toFixed(2);
             
             if (!navMap[icao]) navMap[icao] = [];
@@ -173,10 +174,11 @@ async function ingestOurAirportsData() {
 
         // 讀取 Runways
         rText.split('\n').slice(1).forEach(line => {
-            if (!line.trim()) return; // 防呆
+            if (!line.trim()) return; 
             const c = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
             if (c.length < 18) return;
             
+            // OurAirports Runways 第2欄是 airport_ident (ICAO)
             const icao = c[2].replace(/"/g,'').toUpperCase().trim();
             if (!navDataDB[icao]) navDataDB[icao] = {};
 
@@ -187,16 +189,26 @@ async function ingestOurAirportsData() {
                 const airportNavs = navMap[icao] || [];
                 const crs = end.hdg ? Math.round(parseFloat(end.hdg.replace(/"/g,''))).toString().padStart(3,'0') : rId.replace(/\D/g,'').padStart(2,'0')+"0";
 
-                // VOR 查找
+                // VOR 查找 (優先找同機場的 VORTAC/VOR)
                 let vorMatch = airportNavs.find(n => n.type === 'VORTAC') || 
                                airportNavs.find(n => n.type === 'VOR-DME') || 
                                airportNavs.find(n => n.type === 'VOR');
 
-                // ILS 查找
+                // ILS 查找 (修正比對邏輯)
+                // 1. 確認是 ILS/LOC 類型
+                // 2. 比對 Name 是否包含跑道號碼 (例如 "05L")，轉大寫比對
                 let ilsMatch = airportNavs.find(n => 
                     (n.type.includes('ILS') || n.type.includes('LOC')) && 
-                    (n.name.includes(` ${rId}`) || n.ident.includes(rId.replace(/\D/g,'')))
+                    (n.name.toUpperCase().includes(rId.toUpperCase()))
                 );
+
+                // 如果用 Name 找不到，嘗試用 Identifier 找 (針對只有數字的情況 "05")
+                if (!ilsMatch) {
+                     ilsMatch = airportNavs.find(n => 
+                        (n.type.includes('ILS') || n.type.includes('LOC')) && 
+                        (n.name.toUpperCase().includes("RWY " + rId.replace(/\D/g,''))) 
+                    );
+                }
 
                 navDataDB[icao][rId] = {
                     vor: vorMatch ? { ...vorMatch, crs: crs } : null,
@@ -269,9 +281,17 @@ function refreshTab2() {
 
     // NAV 資料顯示 (VOR/ILS 分離)
     let nav = { vor: null, ils: null };
-    // 安全存取: 確認資料存在才讀取
+    // 安全存取
     if (navDataDB[currentData.id] && navDataDB[currentData.id][r]) {
         nav = navDataDB[currentData.id][r];
+    } else {
+        // Fallback: 嘗試模糊比對 (例如 CSV 只有 "05" 但我們要找 "05L")
+        if (navDataDB[currentData.id]) {
+            let shortR = r.replace(/\D/g, ''); // "05L" -> "05"
+            if (navDataDB[currentData.id][shortR]) {
+                nav = navDataDB[currentData.id][shortR];
+            }
+        }
     }
 
     let navHtml = "";
