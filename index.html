@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pocket METAR Pro - Instructor Edition v2.9</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; --text: #f8fafc; --dim: #94a3b8; --green: #4ade80; --red: #fb7185; --warn: #facc15; --orange: #fb923c; }
+        body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 10px; }
+        .container { max-width: 650px; margin: 0 auto; }
+        .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+        .tab-btn { flex: 1; padding: 14px; background: #334155; border: none; color: white; border-radius: 8px 8px 0 0; cursor: pointer; opacity: 0.6; font-weight: bold; }
+        .tab-btn.active { background: var(--card); border-bottom: 3px solid var(--accent); opacity: 1; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .card { background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 10px 15px rgba(0,0,0,0.3); }
+        .label-sm { font-size: 0.7rem; color: var(--dim); text-transform: uppercase; font-weight: bold; margin-bottom: 8px; display: block; }
+        .rwy-id { font-size: 3.5rem; font-weight: 900; line-height: 1; letter-spacing: -2px; }
+        .raw-text { font-family: 'Consolas', monospace; color: var(--green); font-size: 0.85rem; line-height: 1.4; background: #000; padding: 10px; border-radius: 6px; border-left: 4px solid var(--green); margin-top: 8px; white-space: pre-wrap; word-break: break-all; }
+        .compass-wrap { position: relative; width: 260px; height: 260px; margin: 15px auto; border-radius: 50%; background: #1a365d; border: 2px solid #334155; }
+        .rwy-bar { position: absolute; top: 50%; left: 50%; width: 160px; height: 20px; background: #111; border: 1.5px solid #fff; transform: translate(-50%, -50%); z-index: 10; display: flex; justify-content: space-between; align-items: center; padding: 0 10px; border-radius: 3px; }
+        .rwy-num { display: inline-block; color: white; font-size: 11px; font-weight: bold; font-family: monospace; }
+        .wind-ptr { position: absolute; top: 50%; left: 50%; width: 0; height: 0; transform-origin: center center; z-index: 20; transition: transform 0.8s ease; }
+        #map { height: 260px; border-radius: 12px; margin-top: 10px; background: #111; border: 1px solid #444; }
+        .input-group { display: flex; gap: 8px; margin-bottom: 10px; }
+        .input-group input { flex: 1; padding: 12px; background: #334155; color: white; border: none; border-radius: 8px; font-weight: bold; text-transform: uppercase; }
+        .input-group button { padding: 0 20px; background: var(--accent); color: #000; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        select, .tas-input { width: 100%; padding: 14px; background: #334155; color: white; border: none; border-radius: 8px; font-size: 1rem; box-sizing: border-box; }
+        .nav-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        .nav-table td { padding: 10px 5px; border-bottom: 1px solid #334151; }
+        .nav-table .val { color: var(--accent); font-weight: bold; font-family: 'Consolas', monospace; }
+        .cloud-item { display: flex; justify-content: space-between; background: rgba(56, 189, 248, 0.1); padding: 8px 12px; border-radius: 8px; border-left: 4px solid var(--accent); margin-bottom: 4px; }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+        .info-item { background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; border-left: 3px solid #475569; }
+        .warn-text { color: var(--red) !important; animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0.5; } }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab(1)">機場資訊</button>
+        <button class="tab-btn" onclick="switchTab(2)">航線計算</button>
+    </div>
+
+    <div id="tab1" class="tab-content active">
+        <div class="card">
+            <span class="label-sm">ICAO 手動輸入 / 選取</span>
+            <div class="input-group">
+                <input type="text" id="icaoInput" placeholder="例如: RCTP" maxlength="4">
+                <button onclick="manualUpdate()">查詢</button>
+            </div>
+            <select id="apSelect" onchange="document.getElementById('icaoInput').value=this.value; update()"></select>
+        </div>
+        <div class="card"><span class="label-sm">原始電碼 RAW DATA</span><div id="rawView" class="raw-text">數據庫載入中...</div></div>
+        <div id="map"></div>
+        <div class="card">
+            <span class="label-sm">重點解譯 DECODER</span>
+            <div class="info-grid">
+                <div class="info-item"><span class="label-sm" style="margin:0">能見度 VIS</span><div id="visVal" style="font-weight:bold; font-size:1.1rem">--</div></div>
+                <div class="info-item"><span class="label-sm" style="margin:0">氣壓 QNH</span><div id="qnhVal" style="font-weight:bold; font-size:1.1rem">--</div></div>
+            </div>
+            <div id="cloudBox" style="margin-top:8px"></div>
+            <div id="rmkBox" style="margin-top:10px; font-size:0.85rem; color:var(--accent); white-space: pre-line;"></div>
+        </div>
+        <button onclick="transfer()" style="width:100%; padding:18px; background:var(--accent); color:#000; border:none; border-radius:12px; font-weight:bold; cursor:pointer; margin: 10px 0 30px 0;">傳送至計算頁面 ➔</button>
+    </div>
+
+    <div id="tab2" class="tab-content">
+        <div class="card">
+            <div style="display:flex; gap:10px; align-items: flex-end;">
+                <div style="flex:2"><span class="label-sm">選取跑道</span><select id="tab2Rwy" onchange="refreshTab2()"></select></div>
+                <div style="flex:1"><span class="label-sm">空速 TAS</span><input type="number" id="tasInput" class="tas-input" value="90" oninput="refreshTab2()"></div>
+            </div>
+            <div style="display:flex; gap:5px; margin-top:10px;">
+                <button id="bL" style="flex:1; padding:10px; border-radius:5px; border:none; cursor:pointer;" onclick="setSide('L')">LEFT Traffic</button>
+                <button id="bR" style="flex:1; padding:10px; border-radius:5px; border:none; cursor:pointer;" onclick="setSide('R')">RIGHT Traffic</button>
+            </div>
+        </div>
+        <div class="card" style="text-align:center">
+            <div class="compass-wrap">
+                <svg width="260" height="260" viewBox="0 0 200 200" id="compSvg"></svg>
+                <div id="rwyBar" class="rwy-bar"><span id="n1" class="rwy-num">--</span><span id="n2" class="rwy-num">--</span></div>
+                <div id="windPtr" class="wind-ptr"><svg width="24" height="30" viewBox="0 0 24 30" style="position:absolute; top:-125px; left:-12px;"><path d="M12 30 L24 5 L12 12 L0 5 Z" fill="white" /></svg></div>
+            </div>
+        </div>
+        <div class="card" style="padding:10px">
+            <span class="label-sm">航線修正 WCA & GS</span>
+            <table style="width:100%; font-size: 0.9rem; border-collapse: collapse; text-align: center;">
+                <tbody id="wcaList"></tbody>
+            </table>
+        </div>
+        <div class="card"><span class="label-sm">導航資料 NAV (ILS & VOR)</span><table class="nav-table"><tbody id="navDataTable"></tbody></table></div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const airportDB = {
+    "RCTP": { name: "桃園 Taoyuan", lat: 25.0797, lon: 121.2342, rwys: { "05L": {mag:52, true:48.8}, "05R": {mag:52, true:48.8}, "23L": {mag:232, true:228.8}, "23R": {mag:232, true:228.8} } },
+    "RCSS": { name: "松山 Songshan", lat: 25.0697, lon: 121.5525, rwys: { "10": {mag:100, true:93.5}, "28": {mag:280, true:273.5} } },
+    "RCKH": { name: "高雄 Kaohsiung", lat: 22.5771, lon: 120.3500, rwys: { "09": {mag:87, true:84.2}, "27": {mag:267, true:264.2} } },
+    "RCMQ": { name: "台中 Taichung", lat: 24.2582, lon: 120.6203, rwys: { "18": {mag:180, true:175}, "36": {mag:360, true:355} } },
+    "RCNN": { name: "台南 Tainan", lat: 22.9507, lon: 120.2058, rwys: { "18R": {mag:180, true:176.5}, "36L": {mag:360, true:356.5} } },
+    "RCBS": { name: "金門 Kinmen", lat: 24.4297, lon: 118.3586, rwys: { "06": {mag:60, true:55}, "24": {mag:240, true:235} } },
+    "RCQC": { name: "澎湖 Penghu", lat: 23.5681, lon: 119.6281, rwys: { "02": {mag:20, true:16.5}, "20": {mag:200, true:196.5} } },
+    "VHHH": { name: "香港 Hong Kong", lat: 22.3089, lon: 113.9145, rwys: { "07L": {mag:73, true:71}, "25R": {mag:253, true:251} } },
+    "VMMC": { name: "澳門 Macau", lat: 22.1495, lon: 113.5915, rwys: { "16": {mag:160, true:158}, "34": {mag:340, true:338} } },
+    "WSSS": { name: "新加坡 Singapore", lat: 1.3644, lon: 103.9915, rwys: { "02L": {mag:20, true:20}, "20R": {mag:200, true:200} } },
+    "RKSI": { name: "首爾仁川 Incheon", lat: 37.4602, lon: 126.4407, rwys: { "15R": {mag:153, true:145}, "33L": {mag:333, true:325} } },
+    "RJTT": { name: "東京羽田 Haneda", lat: 35.5494, lon: 139.7798, rwys: { "34L": {mag:337, true:330}, "34R": {mag:337, true:330}, "16L": {mag:157, true:150}, "16R": {mag:157, true:150} } },
+    "KJFK": { name: "紐約 JFK", lat: 40.6413, lon: -73.7781, rwys: { "04L": {mag:44, true:57}, "22R": {mag:224, true:237} } },
+    "KLAX": { name: "洛杉磯 L.A.", lat: 33.9416, lon: -118.4085, rwys: { "24L": {mag:251, true:263}, "25R": {mag:251, true:263} } }
+};
+
+const groups = [
+    { label: "🇹🇼 台灣 Taiwan", ids: ["RCTP", "RCSS", "RCKH", "RCMQ", "RCNN", "RCBS", "RCQC"] },
+    { label: "🌏 亞太 Asia-Pacific", ids: ["VHHH", "VMMC", "WSSS", "RKSI", "RJTT"] },
+    { label: "🇺🇸 歐美 Global", ids: ["KJFK", "KLAX"] }
+];
+
+let navDataDB = {}, currentData = null, trafficSide = 'L', map, marker, patternOverlay;
+
+// 1. 強化型 MHz 轉 TACAN Channel
+function mhzToTacan(mhz) {
+    const f = parseFloat(mhz); if (isNaN(f)) return "";
+    let ch = "";
+    if (f >= 108.00 && f <= 111.95) ch = Math.round((f - 106.3) * 10) + "X";
+    else if (f >= 112.30 && f <= 117.95) ch = Math.round((f - 105.3) * 10) + "X";
+    return ch ? `(${ch})` : "";
+}
+
+// 2. Decoder 邏輯
+const decodeMetarLogic = (raw) => {
+    let d = [];
+    if(raw.includes("NOSIG")) d.push("• NOSIG (天氣穩定)");
+    if(raw.includes("CAVOK")) d.push("• CAVOK (能見/雲況良好)");
+    if(raw.includes("TS")) d.push("• TS (雷暴風險)");
+    if(raw.includes("WS")) d.push("• WS (風切預警)");
+    if(raw.includes("RA")) d.push("• RA (降雨)");
+    if(raw.includes("FG") || raw.includes("BR")) d.push("• FG/BR (低能見度)");
+    return d.length > 0 ? d.join('\n') : "無顯著天氣現象";
+};
+
+// 3. 數據庫索引修正與讀取 (UPDATE: 同時儲存 ILS 和 VOR)
+async function ingestOurAirportsData() {
+    try {
+        const [rRes, nRes] = await Promise.all([fetch('runways.csv'), fetch('navaids.csv')]);
+        const rText = await rRes.text(), nText = await nRes.text();
+        const navMap = {}; 
+
+        // 讀取 Navaids
+        nText.split('\n').slice(1).forEach(line => {
+            const c = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+            if (c.length < 20) return;
+            const ident = c[2].replace(/"/g,''), type = c[4], freqRaw = parseFloat(c[5]), icao = c[19].toUpperCase().replace(/"/g,'').trim();
+            const freq = (freqRaw > 500) ? (freqRaw / 1000).toFixed(2) : freqRaw.toFixed(2);
+            if (!navMap[icao]) navMap[icao] = [];
+            navMap[icao].push({ ident, type, freq, name: c[3] });
+        });
+
+        // 讀取 Runways 並配對
+        rText.split('\n').slice(1).forEach(line => {
+            const c = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+            if (c.length < 19) return;
+            const icao = c[2].replace(/"/g,'').toUpperCase().trim();
+            if (!navDataDB[icao]) navDataDB[icao] = {};
+
+            // 針對跑道兩端分別處理
+            [ {id: c[8], hdg: c[12]}, {id: c[14], hdg: c[18]} ].forEach(end => {
+                const rId = end.id.replace(/"/g,'').trim(); if (!rId) return;
+                const airportNavs = navMap[icao] || [];
+                const crs = end.hdg ? Math.round(parseFloat(end.hdg.replace(/"/g,''))).toString().padStart(3,'0') : rId.padStart(2,'0')+"0";
+
+                // 1. 找 VOR (全機場通用，優先找 VORTAC 或 VOR-DME)
+                let vorMatch = airportNavs.find(n => n.type === 'VORTAC') || 
+                               airportNavs.find(n => n.type === 'VOR-DME') || 
+                               airportNavs.find(n => n.type === 'VOR');
+
+                // 2. 找 ILS (跑道專用，名稱通常包含跑道號碼，如 "05L")
+                let ilsMatch = airportNavs.find(n => 
+                    (n.type.includes('ILS') || n.type.includes('LOC')) && 
+                    (n.name.includes(` ${rId}`) || n.ident.includes(rId.replace(/\D/g,'')))
+                );
+
+                // 存入雙重資料
+                navDataDB[icao][rId] = {
+                    vor: vorMatch ? { ...vorMatch, crs: crs } : null,
+                    ils: ilsMatch ? { ...ilsMatch, crs: crs } : null
+                };
+            });
+        });
+        document.getElementById('rawView').innerText = "數據庫 (VOR/ILS) 已就緒。";
+    } catch (e) { document.getElementById('rawView').innerText = "加載錯誤"; }
+}
+
+function update() {
+    const id = document.getElementById('icaoInput').value.toUpperCase(); if (!id) return;
+    const ap = airportDB[id] || { name: id, lat: 25.07, lon: 121.23, rwys: {} };
+    fetch(`https://metar.vatsim.net/metar.php?id=${id}&t=${Date.now()}`).then(r => r.text()).then(raw => {
+        document.getElementById('rawView').innerText = raw.trim();
+        
+        // 風向
+        const wMatch = raw.match(/(VRB|\d{3})(\d{2,3})(G\d{2,3})?KT/);
+        let dir = 0, spd = 0; if (wMatch) { dir = wMatch[1]==="VRB"?0:parseInt(wMatch[1]); spd = parseInt(wMatch[2]); }
+        
+        // CAVOK 優先處理
+        if (raw.includes("CAVOK")) {
+            document.getElementById('visVal').innerText = "10km+ (CAVOK)";
+        } else {
+            const visMatch = raw.match(/\b\d{4}\b/);
+            document.getElementById('visVal').innerText = visMatch ? (visMatch[0]==="9999"?"10km+":visMatch[0]+"m") : "N/A";
+        }
+        
+        const qMatch = raw.match(/Q(\d{4})/);
+        const aMatch = raw.match(/A(\d{4})/);
+        document.getElementById('qnhVal').innerText = qMatch ? qMatch[1]+" hPa" : (aMatch ? (parseInt(aMatch[1])/100).toFixed(2)+" inHg" : "--");
+        
+        const cloudRegex = /(FEW|SCT|BKN|OVC|VV)(\d{3})/g;
+        let cMatch, cloudsHtml = "";
+        while ((cMatch = cloudRegex.exec(raw)) !== null) {
+            cloudsHtml += `<div class="cloud-item"><span><b>${cMatch[1]}</b></span><span>${parseInt(cMatch[2])*100} ft</span></div>`;
+        }
+        document.getElementById('cloudBox').innerHTML = cloudsHtml || "Sky Clear / NSC";
+        document.getElementById('rmkBox').innerText = decodeMetarLogic(raw);
+
+        let best = "--", minD = 180;
+        for(let r in ap.rwys) { let diff = Math.abs(dir-ap.rwys[r].mag); if(diff>180) diff=360-diff; if(diff<minD){minD=diff; best=r;} }
+        currentData = { id, dir, spd, best };
+        map.setView([ap.lat, ap.lon], 14); marker.setLatLng([ap.lat, ap.lon]);
+        if(best !== "--") drawMapPattern(id, best);
+    });
+}
+
+function refreshTab2() {
+    if(!currentData) return; 
+    const r = document.getElementById('tab2Rwy').value, ap = airportDB[currentData.id];
+    const tas = parseInt(document.getElementById('tasInput').value) || 90;
+    const magH = (ap && ap.rwys[r]) ? ap.rwys[r].mag : parseInt(r)*10;
+    
+    // -- 羅盤與 WCA 計算 --
+    document.getElementById('rwyBar').style.transform = `translate(-50%, -50%) rotate(${magH-90}deg)`;
+    document.getElementById('n1').innerText = r; document.getElementById('n2').innerText = (parseInt(r)>18?parseInt(r)-18:parseInt(r)+18).toString().padStart(2,'0');
+    document.getElementById('windPtr').style.transform = `translate(-50%, -50%) rotate(${currentData.dir}deg)`;
+    
+    const legs = [{n:"Upwind", t:magH}, {n:"Cross", t:(magH+(trafficSide==='L'?-90:90)+360)%3
