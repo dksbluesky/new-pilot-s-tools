@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pocket METAR Pro - Instructor Edition v3.5 (Dynamic Course)</title>
+    <title>Pocket METAR Pro - Instructor Edition v3.7 (CSV + TACAN)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; --text: #f8fafc; --dim: #94a3b8; --green: #4ade80; --red: #fb7185; --warn: #facc15; --orange: #fb923c; }
@@ -139,6 +139,15 @@ function logDebug(msg) {
         el.innerText += msg + "\n";
         console.log(msg);
     }
+}
+
+// 1. TACAN Channel 轉換函式
+function mhzToTacan(mhz) {
+    const f = parseFloat(mhz); if (isNaN(f)) return "";
+    let ch = "";
+    if (f >= 108.00 && f <= 111.95) ch = Math.round((f - 106.3) * 10) + "X";
+    else if (f >= 112.30 && f <= 117.95) ch = Math.round((f - 105.3) * 10) + "X";
+    return ch ? `(${ch})` : "";
 }
 
 const decodeMetarLogic = (raw) => {
@@ -313,9 +322,10 @@ function refreshTab2() {
     const forcedCrs = magH.toString().padStart(3, '0');
 
     if (vor) {
+        // [MODIFIED] 這裡加入了 mhzToTacan(vor.freq) 的呼叫
         navHtml += `
             <tr style="background:rgba(255, 255, 255, 0.05);"><td colspan="2" style="padding:4px 5px; color:var(--orange); font-size:0.8rem;">● VOR / TACAN</td></tr>
-            <tr><td>${vor.ident} (${vor.type})</td><td align="right" class="val">${vor.freq} MHz</td></tr>
+            <tr><td>${vor.ident} (${vor.type})</td><td align="right" class="val">${vor.freq} MHz <span style="color:var(--warn); font-size:0.8em">${mhzToTacan(vor.freq)}</span></td></tr>
             <tr><td style="border-bottom:2px solid #334155">Inbound Crs</td><td align="right" class="val" style="border-bottom:2px solid #334155">${forcedCrs}°</td></tr>
         `;
     }
@@ -339,7 +349,6 @@ function refreshTab2() {
         allIlsCard.style.display = 'block';
         let dbgHtml = "";
         navs.forEach(n => {
-             // 簡單過濾一下只顯示 VOR 和 ILS
              if(n.type.includes('ILS') || n.type.includes('LOC') || n.type.includes('VOR')) {
                  dbgHtml += `[${n.type}] ${n.ident} ${n.freq} - ${n.name}\n`;
              }
