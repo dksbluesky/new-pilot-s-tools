@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pocket METAR Pro - Instructor Edition v3.4 (ILS Fix)</title>
+    <title>Pocket METAR Pro - Instructor Edition v3.5 (Dynamic Course)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; --text: #f8fafc; --dim: #94a3b8; --green: #4ade80; --red: #fb7185; --warn: #facc15; --orange: #fb923c; }
@@ -131,7 +131,6 @@ const groups = [
 ];
 
 let navDataDB = {}, currentData = null, trafficSide = 'L', map, marker, patternOverlay;
-// 新增: 用來存該機場所有 Navaids，方便後續比對
 let currentAirportNavaids = [];
 
 function logDebug(msg) {
@@ -167,23 +166,20 @@ async function ingestOurAirportsData() {
         const nLines = nText.split('\n');
         const nHeaders = nLines[0].replace(/"/g,'').split(',');
         
-        // 自動偵測欄位
         const nIdx = {
             ident: nHeaders.indexOf('ident'),
             name: nHeaders.indexOf('name'),
             type: nHeaders.indexOf('type'),
             freq: nHeaders.indexOf('frequency_khz'),
             airport: nHeaders.indexOf('associated_airport'),
-            filename: nHeaders.indexOf('filename') // 增加 filename 輔助比對
+            filename: nHeaders.indexOf('filename')
         };
         
-        // 如果自動偵測失敗，使用 OurAirports 標準預設值
         if (nIdx.freq === -1 || nIdx.airport === -1) {
             logDebug("警告: 欄位自動偵測失敗，切換至預設模式");
             nIdx.ident = 2; nIdx.name = 3; nIdx.type = 4; nIdx.freq = 5; nIdx.airport = 19;
         }
 
-        // 我們不在此時做死板配對，而是將所有 Navaids 存入全域字典
         const tempNavMap = {};
         
         nLines.slice(1).forEach(line => {
@@ -207,14 +203,9 @@ async function ingestOurAirportsData() {
             tempNavMap[icao].push({ ident, type, freq, name, filename });
         });
         
-        // 存到全域變數，供 refreshTab2 使用
         navDataDB = tempNavMap;
-        
-        // --- RUNWAYS 解析 (僅用來確認跑道存在，不做預配對) ---
-        // 這裡我們不需要太複雜，因為跑道清單已由 airportDB (Tab 1) 控制
-        // 但為了確認 CSV 讀取成功，我們統計一下
         document.getElementById('rawView').innerText = "數據庫 (CSV) 已載入完成。\nNavaids: OK";
-        logDebug(`資料庫索引建立完成。RCTP 有 ${tempNavMap['RCTP']?.length || 0} 個導航設施。`);
+        logDebug(`資料庫索引建立完成。`);
 
     } catch (e) { 
         console.error(e);
@@ -227,8 +218,8 @@ function update() {
     const id = document.getElementById('icaoInput').value.toUpperCase(); if (!id) return;
     const ap = airportDB[id] || { name: id, lat: 25.07, lon: 121.23, rwys: {} };
     
-    // 更新全域當前機場導航列表
     currentAirportNavaids = navDataDB[id] || [];
+    logDebug(`切換機場至 ${id}，找到 ${currentAirportNavaids.length} 個導航設施。`);
     
     fetch(`https://metar.vatsim.net/metar.php?id=${id}&t=${Date.now()}`).then(r => r.text()).then(raw => {
         document.getElementById('rawView').innerText = raw.trim();
@@ -267,11 +258,12 @@ function refreshTab2() {
     if(!currentData) return; 
     
     // --- WCA 計算 ---
+    let magH = 0;
     try {
         const r = document.getElementById('tab2Rwy').value;
         const ap = airportDB[currentData.id];
         const tas = parseInt(document.getElementById('tasInput').value) || 90;
-        const magH = (ap && ap.rwys[r]) ? ap.rwys[r].mag : parseInt(r)*10;
+        magH = (ap && ap.rwys[r]) ? ap.rwys[r].mag : parseInt(r)*10;
         
         document.getElementById('rwyBar').style.transform = `translate(-50%, -50%) rotate(${magH-90}deg)`;
         document.getElementById('n1').innerText = r; document.getElementById('n2').innerText = (parseInt(r)>18?parseInt(r)-18:parseInt(r)+18).toString().padStart(2,'0');
@@ -288,66 +280,50 @@ function refreshTab2() {
         document.getElementById('wcaList').innerHTML = h;
     } catch(e) { console.error("WCA Error:", e); }
 
-    // --- NAV Data Logic (即時配對) ---
+    // --- NAV Data Logic (Dynamic Course Injection) ---
     const rId = document.getElementById('tab2Rwy').value; // e.g., "05L"
     const rIdClean = rId.replace(/\D/g, ''); // "05"
     
-    // 找出所有此機場的 Navs
     const navs = currentAirportNavaids;
     
-    // 1. VOR 搜尋 (最寬鬆)
+    // 1. VOR 搜尋
     const vor = navs.find(n => n.type.includes('VOR'));
 
-    // 2. ILS 搜尋 (多重條件比對)
-    // 優先順序: 
-    // A. 名稱包含完整跑道號 (05L)
-    // B. 名稱包含數字 (05) 且若有 L/R 也要對應
-    // C. 只有數字 (05)
-    
-    let ils = null;
+    // 2. ILS 搜尋
     const isLeft = rId.includes('L');
     const isRight = rId.includes('R');
-    
-    // 篩選出所有 ILS 類型
     const allILS = navs.filter(n => n.type.includes('ILS') || n.type.includes('LOC'));
     
-    // 策略 A: 精確比對 (05L)
-    ils = allILS.find(n => n.name.includes(rId) || n.ident.includes(rId) || n.filename.includes(rId));
-    
-    // 策略 B: 數字比對 + 左右確認 (針對 CSV 寫法不同的情況)
+    let ils = allILS.find(n => n.name.includes(rId) || n.ident.includes(rId) || n.filename.includes(rId));
     if (!ils) {
         ils = allILS.find(n => {
             const hasNum = n.name.includes(rIdClean) || n.ident.includes(rIdClean);
             if (!hasNum) return false;
-            // 如果我們要找 L，確認名稱裡也有 L (簡單防呆)
             if (isLeft && n.name.includes('L')) return true;
             if (isRight && n.name.includes('R')) return true;
             if (!isLeft && !isRight) return true;
             return false;
         });
     }
+    if (!ils) ils = allILS.find(n => n.name.includes(rIdClean));
 
-    // 策略 C: 僅數字比對 (最後手段)
-    if (!ils) {
-        ils = allILS.find(n => n.name.includes(rIdClean));
-    }
-
-    // --- 顯示 HTML ---
+    // --- 顯示 HTML (強制使用當前跑道方位 magH) ---
     let navHtml = "";
-    const crs = (airportDB[currentData.id] && airportDB[currentData.id].rwys[rId]) ? airportDB[currentData.id].rwys[rId].mag : rIdClean+"0";
+    // 強制 Course = 跑道磁方位 (padded to 3 digits)
+    const forcedCrs = magH.toString().padStart(3, '0');
 
     if (vor) {
         navHtml += `
             <tr style="background:rgba(255, 255, 255, 0.05);"><td colspan="2" style="padding:4px 5px; color:var(--orange); font-size:0.8rem;">● VOR / TACAN</td></tr>
             <tr><td>${vor.ident} (${vor.type})</td><td align="right" class="val">${vor.freq} MHz</td></tr>
-            <tr><td style="border-bottom:2px solid #334155">Inbound Crs</td><td align="right" class="val" style="border-bottom:2px solid #334155">${vor.ident === 'TIA' ? '052' : crs}°</td></tr>
+            <tr><td style="border-bottom:2px solid #334155">Inbound Crs</td><td align="right" class="val" style="border-bottom:2px solid #334155">${forcedCrs}°</td></tr>
         `;
     }
     if (ils) {
         navHtml += `
             <tr style="background:rgba(56, 189, 248, 0.1);"><td colspan="2" style="padding:4px 5px; color:var(--accent); font-size:0.8rem;">● ILS APPROACH</td></tr>
             <tr><td>${ils.ident} (${ils.type})</td><td align="right" class="val">${ils.freq} MHz</td></tr>
-            <tr><td>LOC Course</td><td align="right" class="val">${crs}°</td></tr>
+            <tr><td>LOC Course</td><td align="right" class="val">${forcedCrs}°</td></tr>
         `;
     }
     
@@ -356,16 +332,19 @@ function refreshTab2() {
     }
     document.getElementById('navDataTable').innerHTML = navHtml;
 
-    // --- 偵錯顯示區 (把所有找到的 ILS 列出來給使用者看) ---
+    // --- 偵錯顯示區 ---
     const allIlsList = document.getElementById('allIlsList');
     const allIlsCard = document.getElementById('allIlsCard');
     if (navs.length > 0) {
         allIlsCard.style.display = 'block';
         let dbgHtml = "";
-        navs.filter(n => n.type.includes('ILS') || n.type.includes('LOC')).forEach(n => {
-            dbgHtml += `[${n.ident}] ${n.freq} - ${n.name}\n`;
+        navs.forEach(n => {
+             // 簡單過濾一下只顯示 VOR 和 ILS
+             if(n.type.includes('ILS') || n.type.includes('LOC') || n.type.includes('VOR')) {
+                 dbgHtml += `[${n.type}] ${n.ident} ${n.freq} - ${n.name}\n`;
+             }
         });
-        if (dbgHtml === "") dbgHtml = "此機場 CSV 中無 ILS 資料";
+        if (dbgHtml === "") dbgHtml = "CSV 中無 VOR/ILS 資料";
         allIlsList.innerText = dbgHtml;
     } else {
         allIlsCard.style.display = 'none';
