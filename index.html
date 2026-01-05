@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pocket METAR Pro - Instructor Edition v3.1 (CSV Fix)</title>
+    <title>Pocket METAR Pro - Instructor Edition v3.2 (Case Insensitive)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; --text: #f8fafc; --dim: #94a3b8; --green: #4ade80; --red: #fb7185; --warn: #facc15; --orange: #fb923c; }
@@ -142,7 +142,7 @@ const decodeMetarLogic = (raw) => {
     return d.length > 0 ? d.join('\n') : "無顯著天氣現象";
 };
 
-// 3. 數據庫讀取 (修正 Matching 邏輯與空值保護)
+// 3. 數據庫讀取 (強制大寫比對，解決大小寫問題)
 async function ingestOurAirportsData() {
     try {
         const [rRes, nRes] = await Promise.all([
@@ -158,12 +158,11 @@ async function ingestOurAirportsData() {
             const c = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
             if (c.length < 19) return; 
             
-            const ident = c[2].replace(/"/g,'');
-            const type = c[4];
+            const ident = c[2].replace(/"/g,'').toUpperCase(); // 轉大寫
+            const type = c[4].toUpperCase(); // 轉大寫
             const freqRaw = parseFloat(c[5]);
-            // OurAirports Navaids 第19欄是 associated_airport (ICAO)
-            const icao = c[19].toUpperCase().replace(/"/g,'').trim();
-            const name = c[3].replace(/"/g,''); // 移除名稱的引號
+            const icao = c[19].toUpperCase().replace(/"/g,'').trim(); // 轉大寫
+            const name = c[3].replace(/"/g,'').toUpperCase(); // 名稱也轉大寫，方便後續比對
             
             if (!freqRaw) return; 
             const freq = (freqRaw > 500) ? (freqRaw / 1000).toFixed(2) : freqRaw.toFixed(2);
@@ -178,35 +177,32 @@ async function ingestOurAirportsData() {
             const c = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
             if (c.length < 18) return;
             
-            // OurAirports Runways 第2欄是 airport_ident (ICAO)
             const icao = c[2].replace(/"/g,'').toUpperCase().trim();
             if (!navDataDB[icao]) navDataDB[icao] = {};
 
             [ {id: c[8], hdg: c[12]}, {id: c[14], hdg: c[18]} ].forEach(end => {
-                const rId = end.id ? end.id.replace(/"/g,'').trim() : "";
+                const rId = end.id ? end.id.replace(/"/g,'').trim().toUpperCase() : ""; // 跑道號轉大寫
                 if (!rId) return;
                 
                 const airportNavs = navMap[icao] || [];
                 const crs = end.hdg ? Math.round(parseFloat(end.hdg.replace(/"/g,''))).toString().padStart(3,'0') : rId.replace(/\D/g,'').padStart(2,'0')+"0";
 
-                // VOR 查找 (優先找同機場的 VORTAC/VOR)
-                let vorMatch = airportNavs.find(n => n.type === 'VORTAC') || 
-                               airportNavs.find(n => n.type === 'VOR-DME') || 
-                               airportNavs.find(n => n.type === 'VOR');
+                // VOR 查找 (寬鬆比對：只要類型包含 VOR 即可)
+                let vorMatch = airportNavs.find(n => n.type.includes('VOR'));
 
-                // ILS 查找 (修正比對邏輯)
-                // 1. 確認是 ILS/LOC 類型
-                // 2. 比對 Name 是否包含跑道號碼 (例如 "05L")，轉大寫比對
+                // ILS 查找 (分層比對，增加命中率)
+                // 1. 名稱包含跑道 (如 "ILS 05L")
                 let ilsMatch = airportNavs.find(n => 
                     (n.type.includes('ILS') || n.type.includes('LOC')) && 
-                    (n.name.toUpperCase().includes(rId.toUpperCase()))
+                    n.name.includes(rId)
                 );
-
-                // 如果用 Name 找不到，嘗試用 Identifier 找 (針對只有數字的情況 "05")
+                
+                // 2. 如果沒找到，嘗試用數字比對 (如找 "05L" 但資料只有 "05")
                 if (!ilsMatch) {
-                     ilsMatch = airportNavs.find(n => 
+                    const rNum = rId.replace(/\D/g, ''); // 取出數字部分
+                    ilsMatch = airportNavs.find(n => 
                         (n.type.includes('ILS') || n.type.includes('LOC')) && 
-                        (n.name.toUpperCase().includes("RWY " + rId.replace(/\D/g,''))) 
+                        n.name.includes(rNum)
                     );
                 }
 
@@ -219,7 +215,7 @@ async function ingestOurAirportsData() {
         document.getElementById('rawView').innerText = "數據庫 (CSV) 已載入完成。";
     } catch (e) { 
         console.error(e);
-        document.getElementById('rawView').innerText = "數據庫載入失敗: " + e.message + "\n(請確認 CSV 檔案位於同一目錄)";
+        document.getElementById('rawView').innerText = "數據庫載入失敗: " + e.message;
     }
 }
 
@@ -279,17 +275,21 @@ function refreshTab2() {
     }); 
     document.getElementById('wcaList').innerHTML = h;
 
-    // NAV 資料顯示 (VOR/ILS 分離)
+    // NAV 資料顯示 (分開處理，避免全無)
     let nav = { vor: null, ils: null };
-    // 安全存取
+    // 嘗試精確匹配
     if (navDataDB[currentData.id] && navDataDB[currentData.id][r]) {
         nav = navDataDB[currentData.id][r];
     } else {
         // Fallback: 嘗試模糊比對 (例如 CSV 只有 "05" 但我們要找 "05L")
         if (navDataDB[currentData.id]) {
             let shortR = r.replace(/\D/g, ''); // "05L" -> "05"
-            if (navDataDB[currentData.id][shortR]) {
-                nav = navDataDB[currentData.id][shortR];
+            // 遍歷該機場所有跑道，找數字相同的
+            for (let k in navDataDB[currentData.id]) {
+                if (k.includes(shortR)) {
+                    nav = navDataDB[currentData.id][k];
+                    break;
+                }
             }
         }
     }
