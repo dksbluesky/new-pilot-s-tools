@@ -178,36 +178,43 @@ function update() {
     .then(r => r.text())
     .then(raw => {
         raw = raw.trim();
-        if (!raw || raw.includes("No METAR")) {
-            document.getElementById('rawView').innerText = "數據源暫無回傳 (可能為軍用基地或站點離線)";
-            document.getElementById('visVal').innerText = "N/A";
-            document.getElementById('qnhVal').innerText = "N/A";
-            document.getElementById('rmkBox').innerText = "提示：此機場之 METAR 數據在民用系統中較不穩定。";
-            return;
+        let dir = 0, spd = 0, qnh = "N/A", vis = "N/A", rmk = "無顯著天氣現象";
+        
+        const hasMetar = raw && !raw.includes("No METAR");
+
+        if (hasMetar) {
+            document.getElementById('rawView').innerText = raw;
+            const wMatch = raw.match(/(VRB|\d{3})(\d{2,3})(G\d{2,3})?KT/);
+            if (wMatch) { dir = wMatch[1]==="VRB"?0:parseInt(wMatch[1]); spd = parseInt(wMatch[2]); }
+            const qMatch = raw.match(/[QA](\d{4})/);
+            qnh = qMatch ? qMatch[0] : "N/A";
+            if (raw.includes("CAVOK")) { vis = "10km+ (CAVOK)"; }
+            else { const visMatch = raw.match(/\b\d{4}\b/); vis = visMatch ? (visMatch[0]==="9999"?"10km+":visMatch[0]+"m") : "N/A"; }
+            let d = []; if(raw.includes("NOSIG")) d.push("• NOSIG (穩定)"); if(raw.includes("CAVOK")) d.push("• CAVOK"); if(raw.includes("TS")) d.push("• 有雷暴");
+            rmk = d.join('\n') || "無顯著天氣";
+        } else {
+            document.getElementById('rawView').innerText = "數據源暫無 METAR (可能為軍用基地或離線)";
+            rmk = "提示：此機場資料在民用系統不穩定，已載入預設值（無風）。";
         }
-        document.getElementById('rawView').innerText = raw;
-        
-        const wMatch = raw.match(/(VRB|\d{3})(\d{2,3})(G\d{2,3})?KT/);
-        let dir = 0, spd = 0; if (wMatch) { dir = wMatch[1]==="VRB"?0:parseInt(wMatch[1]); spd = parseInt(wMatch[2]); }
-        
-        const qMatch = raw.match(/[QA](\d{4})/);
-        document.getElementById('qnhVal').innerText = qMatch ? qMatch[0] : "N/A";
-        
-        if (raw.includes("CAVOK")) { document.getElementById('visVal').innerText = "10km+ (CAVOK)"; }
-        else { const visMatch = raw.match(/\b\d{4}\b/); document.getElementById('visVal').innerText = visMatch ? (visMatch[0]==="9999"?"10km+":visMatch[0]+"m") : "N/A"; }
 
-        let d = []; if(raw.includes("NOSIG")) d.push("• NOSIG (天氣穩定)"); if(raw.includes("CAVOK")) d.push("• CAVOK (能見良好)"); if(raw.includes("TS")) d.push("• 有雷暴風險");
-        document.getElementById('rmkBox').innerText = d.join('\n') || "無顯著天氣現象";
+        // 更新 UI
+        document.getElementById('visVal').innerText = vis;
+        document.getElementById('qnhVal').innerText = qnh;
+        document.getElementById('rmkBox').innerText = rmk;
 
+        // --- 重點：即使沒有 METAR，也要找出跑道資訊並建立 currentData ---
         let best = "--", minD = 180;
         const aptJson = jsonNavCache[id];
         const rwyList = (aptJson && aptJson.runways) ? aptJson.runways : ["18", "36"];
+        
         rwyList.forEach(r => {
             const ils = (aptJson && aptJson.ils_data) ? (aptJson.ils_data[r] || aptJson.ils_data[r.replace(/\D/g,"")]) : null;
             const hdg = ils ? parseInt(ils.crs) : parseInt(r)*10;
             let diff = Math.abs(dir - hdg); if(diff > 180) diff = 360 - diff;
             if(diff < minD) { minD = diff; best = r; }
         });
+
+        // 建立 currentData，這樣 transfer() 才能運作
         currentData = { id, dir, spd, best };
         
         map.setView([ap.lat, ap.lon], 14);
@@ -215,7 +222,9 @@ function update() {
     })
     .catch((err) => { 
         console.error(err);
-        document.getElementById('rawView').innerText = "連線失敗，請檢查網路或 F12 Console。"; 
+        document.getElementById('rawView').innerText = "連線異常，已嘗試載入本地資料。";
+        // 即使出錯，也確保能傳送基本資訊（選定機場 ID）
+        currentData = { id, dir: 0, spd: 0, best: "18" };
     });
 }
 
@@ -314,3 +323,4 @@ window.onload = init;
 </script>
 </body>
 </html>
+
