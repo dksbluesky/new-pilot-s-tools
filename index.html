@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pocket METAR Pro - Instructor Edition v3.5</title>
+    <title>Pocket METAR Pro - Instructor Edition v3.6</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; --text: #f8fafc; --dim: #94a3b8; --green: #4ade80; --red: #fb7185; --warn: #facc15; }
@@ -28,11 +28,12 @@
         .input-group input { flex: 1; padding: 12px; background: #334155; color: white; border: none; border-radius: 8px; font-weight: bold; text-transform: uppercase; }
         .input-group button { padding: 0 20px; background: var(--accent); color: #000; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
         select, .tas-input { width: 100%; padding: 14px; background: #334155; color: white; border: none; border-radius: 8px; font-size: 1rem; box-sizing: border-box; }
-        .calc-row { display: flex; gap: 10px; flex-wrap: wrap; }
-        .calc-row .card { flex: 1; min-width: 250px; margin-bottom: 0; }
         .nav-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        .nav-table th { color: var(--dim); font-size: 0.65rem; text-align: left; padding-bottom: 5px; }
         .nav-table td { padding: 10px 5px; border-bottom: 1px solid #334151; }
+        .nav-table .type-label { font-weight: bold; color: var(--dim); }
         .nav-table .val { color: var(--accent); font-weight: bold; font-family: 'Consolas', monospace; }
+        .nav-table .ch { color: var(--warn); font-size: 0.85rem; }
         .cloud-item { display: flex; justify-content: space-between; background: rgba(56, 189, 248, 0.1); padding: 8px 12px; border-radius: 8px; border-left: 4px solid var(--accent); margin-bottom: 4px; }
         .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
         .info-item { background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; border-left: 3px solid #475569; }
@@ -57,7 +58,7 @@
             </div>
             <select id="apSelect" onchange="document.getElementById('icaoInput').value=this.value; update()"></select>
         </div>
-        <div class="card"><span class="label-sm">原始電碼 RAW DATA</span><div id="rawView" class="raw-text">正在初始化導航數據源...</div></div>
+        <div class="card"><span class="label-sm">原始電碼 RAW DATA</span><div id="rawView" class="raw-text">正在加載數據源...</div></div>
         <div id="map"></div>
         <div class="card">
             <span class="label-sm">重點解譯 DECODER</span>
@@ -68,7 +69,7 @@
             <div id="cloudBox" style="margin-top:8px"></div>
             <div id="rmkBox" style="margin-top:10px; font-size:0.85rem; color:var(--accent); white-space: pre-line;"></div>
         </div>
-        <button onclick="transfer()" style="width:100%; padding:18px; background:var(--accent); color:#000; border:none; border-radius:12px; font-weight:bold; cursor:pointer; margin: 10px 0 20px 0;">傳送至計算頁面 ➔</button>
+        <button onclick="transfer()" style="width:100%; padding:18px; background:var(--accent); color:#000; border:none; border-radius:12px; font-weight:bold; cursor:pointer; margin: 10px 0 30px 0;">傳送至計算頁面 ➔</button>
     </div>
 
     <div id="tab2" class="tab-content">
@@ -89,16 +90,25 @@
                 <div id="windPtr" class="wind-ptr"><svg width="24" height="30" viewBox="0 0 24 30" style="position:absolute; top:-125px; left:-12px;"><path d="M12 30 L24 5 L12 12 L0 5 Z" fill="white" /></svg></div>
             </div>
         </div>
-        <div class="calc-row">
-            <div class="card"><span class="label-sm">航線修正 WCA & GS</span><table style="width:100%; font-size: 0.9rem; border-collapse: collapse; text-align: center;"><tbody id="wcaList"></tbody></table></div>
-            <div class="card"><span class="label-sm">導航資料 (ILS/VOR/TCN)</span><table class="nav-table"><tbody id="navDataTable"></tbody></table></div>
+        <div class="card" style="padding:10px">
+            <span class="label-sm">航線修正 WCA & GS</span>
+            <table style="width:100%; font-size: 0.9rem; border-collapse: collapse; text-align: center;">
+                <tbody id="wcaList"></tbody>
+            </table>
+        </div>
+        <div class="card">
+            <span class="label-sm">導航頻率區隔 (ILS / VOR / TACAN)</span>
+            <table class="nav-table">
+                <thead><tr><th>Type</th><th align="center">Ident</th><th align="right">Freq / Channel</th></tr></thead>
+                <tbody id="navDataTable"></tbody>
+            </table>
         </div>
     </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-// 【100% 還原：DK 老師最完整的機場清單】
+// 【100% 還原：DK 老師原始機場清單】
 const airportDB = {
     "RCTP": { name: "桃園 Taoyuan", lat: 25.0797, lon: 121.2342, rwys: { "05L": {mag:52}, "05R": {mag:52}, "23L": {mag:232}, "23R": {mag:232} } },
     "RCSS": { name: "松山 Songshan", lat: 25.0697, lon: 121.5525, rwys: { "10": {mag:100}, "28": {mag:280} } },
@@ -111,7 +121,7 @@ const airportDB = {
     "VMMC": { name: "澳門 Macau", lat: 22.1495, lon: 113.5915, rwys: { "16": {mag:160}, "34": {mag:340} } },
     "WSSS": { name: "新加坡 Singapore", lat: 1.3644, lon: 103.9915, rwys: { "02L": {mag:20}, "20R": {mag:200} } },
     "RKSI": { name: "首爾仁川 Incheon", lat: 37.4602, lon: 126.4407, rwys: { "15R": {mag:153}, "33L": {mag:333} } },
-    "RJTT": { name: "東京羽田 Haneda", lat: 35.5494, lon: 139.7798, rwys: { "34L": {mag:337}, "34R": {mag:337}, "16L": {mag:157}, "16R": {mag:157} } },
+    "RJTT": { name: "東京羽田 Haneda", lat: 35.5494, lon: 139.7798, rwys: { "34L": {mag:337}, "34R": {mag:337} } },
     "KJFK": { name: "紐約 JFK", lat: 40.6413, lon: -73.7781, rwys: { "04L": {mag:44}, "22R": {mag:224} } },
     "KLAX": { name: "洛杉磯 L.A.", lat: 33.9416, lon: -118.4085, rwys: { "24L": {mag:251}, "25R": {mag:251} } }
 };
@@ -122,9 +132,9 @@ const groups = [
     { label: "🇺🇸 歐美 Global", ids: ["KJFK", "KLAX"] }
 ];
 
-let csvNavData = {}, jsonNavCache = {}, currentData = null, trafficSide = 'L', map, marker, patternOverlay;
+let jsonNavCache = {}, csvVorTcnCache = {}, currentData = null, trafficSide = 'L', map, marker, patternOverlay;
 
-// 1. MHz 轉 TACAN Channel 換算
+// 1. MHz 轉 TACAN Channel (MSFS 專用)
 function mhzToTacan(mhz) {
     const f = parseFloat(mhz); if (isNaN(f)) return "";
     let ch = "";
@@ -133,22 +143,22 @@ function mhzToTacan(mhz) {
     return ch ? `(${ch})` : "";
 }
 
-// 2. 【核心回歸】整合讀取 JSON 與 CSV
-async function loadAllDatabases() {
+// 2. 雙向讀取數據庫
+async function loadDatabases() {
     try {
-        // A. 讀取 PMDG JSON
+        // A. 讀取 JSON (專攻 ILS)
         const jRes = await fetch('database.json').catch(() => null);
         if(jRes) {
             const jData = await jRes.json();
             jData.forEach(apt => { jsonNavCache[apt.code.toUpperCase()] = apt; });
         }
 
-        // B. 讀取 OurAirports CSV (抓取 VOR/TACAN)
+        // B. 讀取 CSV (專攻 VOR/TACAN)
         const [rRes, nRes] = await Promise.all([fetch('runways.csv'), fetch('navaids.csv')]);
         const rText = await rRes.text(), nText = await nRes.text();
         const navMap = {}; 
 
-        // 讀取 Navaids - 使用正則解析防止逗點錯位
+        // 正則解析 navaids.csv
         nText.split('\n').slice(1).forEach(line => {
             const c = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
             if (c.length < 20) return;
@@ -158,27 +168,14 @@ async function loadAllDatabases() {
             navMap[icao].push({ ident, type, freq });
         });
 
-        // 讀取 Runways
-        rText.split('\n').slice(1).forEach(line => {
-            const c = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
-            if (c.length < 19) return;
-            const icao = c[2].replace(/"/g,'').toUpperCase().trim();
-            if (!csvNavData[icao]) csvNavData[icao] = {};
+        // 將抓到的 VOR/TCN 存入 Cache
+        for (let icao in navMap) {
+            const mainNav = navMap[icao].find(n => n.type.includes('TACAN') || n.type.includes('VOR')) || navMap[icao][0];
+            csvVorTcnCache[icao] = mainNav;
+        }
 
-            [ {id: c[8], hdg: c[12]}, {id: c[14], hdg: c[18]} ].forEach(end => {
-                const rId = end.id.replace(/"/g,'').trim(); if (!rId) return;
-                const airportNavs = navMap[icao] || [];
-                const matched = airportNavs.find(n => n.type.includes('TACAN') || n.type.includes('VOR'));
-                csvNavData[icao][rId] = {
-                    ident: matched ? matched.ident : "N/A",
-                    type: matched ? matched.type : "N/A",
-                    freq: matched ? matched.freq : "N/A",
-                    crs: end.hdg ? Math.round(parseFloat(end.hdg.replace(/"/g,''))).toString().padStart(3,'0') : rId.padStart(2,'0')+"0"
-                };
-            });
-        });
-        document.getElementById('rawView').innerText = "導航雙數據庫 (JSON + CSV) 已就緒。";
-    } catch (e) { document.getElementById('rawView').innerText = "導航載入完成 (部分數據源缺失)"; }
+        document.getElementById('rawView').innerText = "導航雙核心已就緒 (ILS + VOR/TCN)。";
+    } catch (e) { document.getElementById('rawView').innerText = "導航載入完成 (部分離線資料缺失)"; }
 }
 
 function update() {
@@ -208,9 +205,9 @@ function update() {
 
         let d = [];
         if(raw.includes("NOSIG")) d.push("• NOSIG (天氣穩定)");
-        if(raw.includes("CAVOK")) d.push("• CAVOK (能見良好)");
-        if(raw.includes("TS")) d.push("• TS (雷暴風險)");
-        document.getElementById('rmkBox').innerText = d.length > 0 ? d.join('\n') : "無顯著天氣現象";
+        if(raw.includes("CAVOK")) d.push("• CAVOK (良好)");
+        if(raw.includes("TS")) d.push("• TS (雷雨)");
+        document.getElementById('rmkBox').innerText = d.length > 0 ? d.join('\n') : "無特殊天氣現象";
 
         let best = "--", minD = 180;
         for(let r in ap.rwys) { let diff = Math.abs(dir-ap.rwys[r].mag); if(diff>180) diff=360-diff; if(diff<minD){minD=diff; best=r;} }
@@ -229,6 +226,7 @@ function refreshTab2() {
     document.getElementById('n1').innerText = r; document.getElementById('n2').innerText = (parseInt(r)>18?parseInt(r)-18:parseInt(r)+18).toString().padStart(2,'0');
     document.getElementById('windPtr').style.transform = `translate(-50%, -50%) rotate(${currentData.dir}deg)`;
     
+    // WCA & GS 計算
     const legs = [{n:"Upwind", t:magH}, {n:"Cross", t:(magH+(trafficSide==='L'?-90:90)+360)%360}, {n:"Downwind", t:(magH+180)%360}, {n:"Base", t:(magH+(trafficSide==='L'?90:-90)+360)%360}];
     let h = ""; legs.forEach(l => {
         const a = (currentData.dir - l.t) * Math.PI / 180;
@@ -239,22 +237,25 @@ function refreshTab2() {
     }); 
     document.getElementById('wcaList').innerHTML = h;
 
-    // --- 【雙重檢索：JSON 優先，CSV 備援】 ---
-    let finalNav = { ident: "N/A", freq: "N/A", crs: magH, type: "" };
-    
-    // 優先看 JSON (抓 ILS)
+    // --- 【物理區隔：ILS vs VOR/TCN】 ---
+    let ilsHtml = `<tr><td class="type-label">ILS</td><td align="center">N/A</td><td align="right">N/A</td></tr>`;
+    let vorHtml = `<tr><td class="type-label">VOR/TCN</td><td align="center">N/A</td><td align="right">N/A</td></tr>`;
+    let courseHtml = `<tr><td class="type-label">COURSE</td><td colspan="2" align="right" class="val">${magH}°</td></tr>`;
+
+    // 1. ILS (From JSON)
     if (jsonNavCache[currentData.id]) {
-        const apt = jsonNavCache[currentData.id];
-        const ils = apt.ils_data[r] || apt.ils_data[r.replace(/\D/g,"")];
-        if (ils) finalNav = { ...ils, type: "ILS" };
-    }
-    
-    // 如果 JSON 沒抓到，看 CSV (抓 VOR/TCN)
-    if (finalNav.ident === "N/A" && csvNavData[currentData.id] && csvNavData[currentData.id][r]) {
-        finalNav = { ...csvNavData[currentData.id][r], type: "NAV" };
+        const ilsData = jsonNavCache[currentData.id].ils_data;
+        const ils = ilsData[r] || ilsData[r.replace(/\D/g,"")];
+        if (ils) ilsHtml = `<tr><td class="type-label">ILS</td><td align="center" class="val">${ils.ident}</td><td align="right" class="val">${ils.freq} <span class="ch">${mhzToTacan(ils.freq)}</span></td></tr>`;
     }
 
-    document.getElementById('navDataTable').innerHTML = `<tr><td>Ident (${finalNav.type})</td><td align="right" class="val">${finalNav.ident}</td></tr><tr><td>Freq</td><td align="right" class="val">${finalNav.freq} MHz <span style="color:var(--warn)">${mhzToTacan(finalNav.freq)}</span></td></tr><tr><td>Course</td><td align="right" class="val">${finalNav.crs}°</td></tr>`;
+    // 2. VOR/TCN (From CSV Cache)
+    const vor = csvVorTcnCache[currentData.id];
+    if (vor) {
+        vorHtml = `<tr><td class="type-label">VOR/TCN</td><td align="center" class="val">${vor.ident}</td><td align="right" class="val">${vor.freq} <span class="ch">${mhzToTacan(vor.freq)}</span></td></tr>`;
+    }
+
+    document.getElementById('navDataTable').innerHTML = ilsHtml + vorHtml + courseHtml;
 }
 
 function transfer() {
@@ -267,17 +268,17 @@ function switchTab(n) { document.querySelectorAll('.tab-content, .tab-btn').forE
 function manualUpdate() { update(); }
 
 function init() {
-    loadAllDatabases();
+    loadDatabases();
     const sel = document.getElementById('apSelect');
     groups.forEach(g => {
         let grp = document.createElement('optgroup'); grp.label = g.label;
         g.ids.forEach(id => { if(airportDB[id]) grp.appendChild(new Option(`${id} - ${airportDB[id].name}`, id)); });
         sel.appendChild(grp);
     });
-    sel.value = "RCSS"; document.getElementById('icaoInput').value = "RCSS";
-    map = L.map('map', { zoomControl: false }).setView([25.0697, 121.5525], 13);
+    sel.value = "RCNN"; document.getElementById('icaoInput').value = "RCNN";
+    map = L.map('map', { zoomControl: false }).setView([22.95, 120.20], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-    marker = L.marker([25.0697, 121.5525]).addTo(map);
+    marker = L.marker([22.95, 120.20]).addTo(map);
     patternOverlay = L.polyline([], { color: '#38bdf8', weight: 3, dashArray: '10, 10' }).addTo(map);
     const svg = document.getElementById('compSvg'), lbls = { 0:'N', 90:'E', 180:'S', 270:'W' };
     let ticks = ''; for(let i=0; i<360; i+=10) {
