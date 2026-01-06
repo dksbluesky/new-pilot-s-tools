@@ -20,7 +20,10 @@
         
         .compass-wrap { position: relative; width: 260px; height: 260px; margin: 15px auto; border-radius: 50%; background: #1a365d; border: 2px solid #334155; }
         .rwy-bar { position: absolute; top: 50%; left: 50%; width: 160px; height: 20px; background: #111; border: 1.5px solid #fff; transform: translate(-50%, -50%); z-index: 10; display: flex; justify-content: space-between; align-items: center; padding: 0 10px; border-radius: 3px; transition: transform 0.6s ease; }
-        .rwy-num { color: white; font-size: 11px; font-weight: bold; font-family: monospace; display: inline-block; }
+        
+        /* 修正：增加 display: flex 與 center 確保數字自轉時不會歪掉 */
+        .rwy-num { color: white; font-size: 11px; font-weight: bold; font-family: monospace; display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; transition: transform 0.6s ease; }
+        
         .wind-ptr { position: absolute; top: 50%; left: 50%; width: 0; height: 0; transform-origin: center center; z-index: 20; transition: transform 0.8s ease; }
         
         #map { height: 260px; border-radius: 12px; margin-top: 10px; background: #111; border: 1px solid #444; }
@@ -86,7 +89,10 @@
         <div class="card" style="text-align:center">
             <div class="compass-wrap">
                 <svg width="260" height="260" viewBox="0 0 200 200" id="compSvg"></svg>
-                <div id="rwyBar" class="rwy-bar"><span id="n1" class="rwy-num">--</span><span id="n2" class="rwy-num">--</span></div>
+                <div id="rwyBar" class="rwy-bar">
+                    <span id="n1" class="rwy-num">--</span>
+                    <span id="n2" class="rwy-num">--</span>
+                </div>
                 <div id="windPtr" class="wind-ptr"><svg width="24" height="30" viewBox="0 0 24 30" style="position:absolute; top:-125px; left:-12px;"><path d="M12 30 L24 5 L12 12 L0 5 Z" fill="white" /></svg></div>
             </div>
         </div>
@@ -184,7 +190,6 @@ function update() {
         const wMatch = raw.match(/(VRB|\d{3})(\d{2,3})(G\d{2,3})?KT/);
         let dir = 0, spd = 0; if (wMatch) { dir = wMatch[1]==="VRB"?0:parseInt(wMatch[1]); spd = parseInt(wMatch[2]); }
         
-        // 修正這裡：變數名稱由 qnhMatch 改為 qMatch
         const qMatch = raw.match(/[QA](\d{4})/);
         document.getElementById('qnhVal').innerText = qMatch ? qMatch[0] : "N/A";
         
@@ -205,7 +210,6 @@ function update() {
         });
         currentData = { id, dir, spd, best };
         
-        // 更新地圖位置
         map.setView([ap.lat, ap.lon], 14);
         marker.setLatLng([ap.lat, ap.lon]);
     })
@@ -227,9 +231,18 @@ function refreshTab2() {
         if (ils) magH = parseInt(ils.crs);
     }
     
-    document.getElementById('rwyBar').style.transform = `translate(-50%, -50%) rotate(${magH-90}deg)`;
-    document.getElementById('n1').innerText = r; 
-    document.getElementById('n2').innerText = (parseInt(r)>18 ? (parseInt(r)-18).toString().padStart(2,'0') : (parseInt(r)+18).toString().padStart(2,'0'));
+    const barRotation = magH - 90; 
+    document.getElementById('rwyBar').style.transform = `translate(-50%, -50%) rotate(${barRotation}deg)`;
+    
+    const n1 = document.getElementById('n1');
+    const n2 = document.getElementById('n2');
+    n1.innerText = r; 
+    n2.innerText = (parseInt(r)>18 ? (parseInt(r)-18).toString().padStart(2,'0') : (parseInt(r)+18).toString().padStart(2,'0'));
+    
+    // 修正：數字反向旋轉保持水平
+    n1.style.transform = `rotate(${-barRotation}deg)`;
+    n2.style.transform = `rotate(${-barRotation}deg)`;
+
     document.getElementById('windPtr').style.transform = `translate(-50%, -50%) rotate(${currentData.dir}deg)`;
     
     const legs = [{n:"Upwind", t:magH}, {n:"Cross", t:(magH+(trafficSide==='L'?-90:90)+360)%360}, {n:"Downwind", t:(magH+180)%360}, {n:"Base", t:(magH+(trafficSide==='L'?90:-90)+360)%360}];
@@ -242,17 +255,11 @@ function refreshTab2() {
     document.getElementById('wcaList').innerHTML = h;
 
     let navContent = "";
-    if (ils) {
-        navContent += `<tr><td class="col-type">ILS</td><td class="col-ident val">${ils.ident}</td><td class="col-freq val">${ils.freq} <span class="ch">${mhzToTacan(ils.freq)}</span></td></tr>`;
-    } else {
-        navContent += `<tr><td class="col-type">ILS</td><td class="col-ident">N/A</td><td class="col-freq">N/A</td></tr>`;
-    }
+    if (ils) { navContent += `<tr><td class="col-type">ILS</td><td class="col-ident val">${ils.ident}</td><td class="col-freq val">${ils.freq} <span class="ch">${mhzToTacan(ils.freq)}</span></td></tr>`; } 
+    else { navContent += `<tr><td class="col-type">ILS</td><td class="col-ident">N/A</td><td class="col-freq">N/A</td></tr>`; }
     const vor = csvVorCache[id];
-    if (vor) {
-        navContent += `<tr><td class="col-type">VOR/TCN</td><td class="col-ident val">${vor.ident}</td><td class="col-freq val">${vor.freq} <span class="ch">${mhzToTacan(vor.freq)}</span></td></tr>`;
-    } else {
-        navContent += `<tr><td class="col-type">VOR/TCN</td><td class="col-ident">N/A</td><td class="col-freq">N/A</td></tr>`;
-    }
+    if (vor) { navContent += `<tr><td class="col-type">VOR/TCN</td><td class="col-ident val">${vor.ident}</td><td class="col-freq val">${vor.freq} <span class="ch">${mhzToTacan(vor.freq)}</span></td></tr>`; } 
+    else { navContent += `<tr><td class="col-type">VOR/TCN</td><td class="col-ident">N/A</td><td class="col-freq">N/A</td></tr>`; }
     navContent += `<tr><td class="col-type">COURSE</td><td colspan="2" class="col-freq val">${magH}°</td></tr>`;
     document.getElementById('navDataTable').innerHTML = navContent;
 }
@@ -269,7 +276,15 @@ function transfer() {
     refreshTab2(); switchTab(2);
 }
 
-function setSide(s) { trafficSide = s; document.getElementById('bL').style.background = s === 'L' ? 'var(--accent)' : '#334155'; document.getElementById('bR').style.background = s === 'R' ? 'var(--accent)' : '#334155'; refreshTab2(); }
+function setSide(s) { 
+    trafficSide = s; 
+    document.getElementById('bL').style.background = s === 'L' ? 'var(--accent)' : '#334155'; 
+    document.getElementById('bL').style.color = s === 'L' ? '#000' : '#fff'; 
+    document.getElementById('bR').style.background = s === 'R' ? 'var(--accent)' : '#334155'; 
+    document.getElementById('bR').style.color = s === 'R' ? '#000' : '#fff';
+    refreshTab2();
+} // <-- 這裡你剛才漏掉了大括號
+
 function switchTab(n) { document.querySelectorAll('.tab-content, .tab-btn').forEach(el => el.classList.remove('active')); document.getElementById('tab' + n).classList.add('active'); document.querySelectorAll('.tab-btn')[n-1].classList.add('active'); }
 function manualUpdate() { update(); }
 
@@ -291,7 +306,9 @@ function init() {
         ticks += `<line x1="${x1}" y1="${y1}" x2="${100+Math.sin(i*Math.PI/180)*96}" y2="${100-Math.cos(i*Math.PI/180)*96}" stroke="#94a3b8" stroke-width="${isL?2:1}" />`;
         if(i % 90 === 0) ticks += `<text x="${100+Math.sin(i*Math.PI/180)*72}" y="${100-Math.cos(i*Math.PI/180)*72}" fill="white" font-size="14" font-weight="bold" text-anchor="middle">${lbls[i]}</text>`;
     } svg.innerHTML = ticks;
-    update();
+    
+    update(); 
+    setSide('L'); 
 }
 window.onload = init;
 </script>
