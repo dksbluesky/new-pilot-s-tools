@@ -3,41 +3,45 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pocket METAR Pro - Instructor v4.3</title>
+    <title>Pocket METAR Pro - Instructor Edition v3.9</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; --text: #f8fafc; --dim: #94a3b8; --green: #4ade80; --red: #fb7185; --warn: #facc15; }
         body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 10px; }
         .container { max-width: 650px; margin: 0 auto; }
         .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
-        .tab-btn { flex: 1; padding: 14px; background: #334155; border: none; color: white; border-radius: 8px 8px 0 0; cursor: pointer; font-weight: bold; }
+        .tab-btn { flex: 1; padding: 14px; background: #334155; border: none; color: white; border-radius: 8px 8px 0 0; cursor: pointer; opacity: 0.6; font-weight: bold; }
         .tab-btn.active { background: var(--card); border-bottom: 3px solid var(--accent); opacity: 1; }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
         .card { background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 10px 15px rgba(0,0,0,0.3); }
         .label-sm { font-size: 0.7rem; color: var(--dim); text-transform: uppercase; font-weight: bold; margin-bottom: 8px; display: block; }
+        .rwy-id { font-size: 3.5rem; font-weight: 900; line-height: 1; letter-spacing: -2px; }
         .raw-text { font-family: 'Consolas', monospace; color: var(--green); font-size: 0.85rem; line-height: 1.4; background: #000; padding: 12px; border-radius: 6px; border-left: 4px solid var(--green); margin-top: 8px; white-space: pre-wrap; word-break: break-all; min-height: 40px; }
         
-        /* 跑道桿樣式修正 */
+        /* 跑道指南針樣式修正 */
         .compass-wrap { position: relative; width: 260px; height: 260px; margin: 15px auto; border-radius: 50%; background: #1a365d; border: 2px solid #334155; }
-        .rwy-bar { position: absolute; top: 50%; left: 50%; width: 160px; height: 20px; background: #111; border: 1.5px solid #fff; transform: translate(-50%, -50%); z-index: 10; display: flex; justify-content: space-between; align-items: center; padding: 0 10px; border-radius: 3px; }
-        .rwy-num { color: white; font-size: 11px; font-weight: bold; font-family: monospace; }
+        .rwy-bar { position: absolute; top: 50%; left: 50%; width: 160px; height: 20px; background: #111; border: 1.5px solid #fff; transform: translate(-50%, -50%); z-index: 10; display: flex; justify-content: space-between; align-items: center; padding: 0 10px; border-radius: 3px; transition: transform 0.6s ease; }
+        .rwy-num { color: white; font-size: 11px; font-weight: bold; font-family: monospace; display: inline-block; }
         .wind-ptr { position: absolute; top: 50%; left: 50%; width: 0; height: 0; transform-origin: center center; z-index: 20; transition: transform 0.8s ease; }
         
         #map { height: 260px; border-radius: 12px; margin-top: 10px; background: #111; border: 1px solid #444; }
         .input-group { display: flex; gap: 8px; margin-bottom: 10px; }
         .input-group input { flex: 1; padding: 12px; background: #334155; color: white; border: none; border-radius: 8px; font-weight: bold; text-transform: uppercase; }
         .input-group button { padding: 0 20px; background: var(--accent); color: #000; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        select, .tas-input { width: 100%; padding: 14px; background: #334155; color: white; border: none; border-radius: 8px; font-size: 1rem; box-sizing: border-box; }
         
-        /* 表格對齊終極修正：標題與內容共用類別 */
+        /* 表格對齊修正 */
         .nav-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; table-layout: fixed; }
-        .nav-table th { padding: 8px 5px; color: var(--dim); font-size: 0.7rem; border-bottom: 1px solid #475569; }
-        .nav-table td { padding: 12px 5px; border-bottom: 1px solid #334151; }
-        .col-type { width: 30%; text-align: left; }
-        .col-ident { width: 25%; text-align: center; }
-        .col-freq { width: 45%; text-align: right; }
-        .val { color: var(--accent); font-weight: bold; font-family: 'Consolas', monospace; }
-        .ch { color: var(--warn); font-size: 0.85rem; }
+        .nav-table th, .nav-table td { padding: 10px 5px; border-bottom: 1px solid #334151; overflow: hidden; white-space: nowrap; }
+        .nav-table .col-type { width: 28%; text-align: left; font-weight: bold; color: var(--dim); }
+        .nav-table .col-ident { width: 22%; text-align: center; }
+        .nav-table .col-freq { width: 50%; text-align: right; }
+        .nav-table .val { color: var(--accent); font-weight: bold; font-family: 'Consolas', monospace; }
+        .nav-table .ch { color: var(--warn); font-size: 0.85rem; }
+        
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+        .info-item { background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; border-left: 3px solid #475569; }
     </style>
 </head>
 <body>
@@ -52,27 +56,23 @@
         <div class="card">
             <span class="label-sm">ICAO 手動輸入 / 選取</span>
             <div class="input-group">
-                <input type="text" id="icaoInput" placeholder="例如: RCSS" maxlength="4">
+                <input type="text" id="icaoInput" placeholder="例如: RCPO" maxlength="4">
                 <button onclick="manualUpdate()">查詢</button>
             </div>
             <select id="apSelect" onchange="document.getElementById('icaoInput').value=this.value; update()"></select>
         </div>
-        <div class="card">
-            <span class="label-sm">原始電碼 RAW DATA</span>
-            <div id="rawView" class="raw-text">等待數據查詢...</div>
-            <button onclick="promptManualMetar()" style="margin-top:10px; background:none; border:1px dashed #555; color:var(--dim); padding:8px; font-size:0.7rem; cursor:pointer; width:100%; border-radius:6px;">[ 網路連線不穩？點此手動貼上 METAR 電碼 ]</button>
-        </div>
+        <div class="card"><span class="label-sm">原始電碼 RAW DATA</span><div id="rawView" class="raw-text">準備就緒。</div></div>
         <div id="map"></div>
         <div class="card">
             <span class="label-sm">重點解譯 DECODER</span>
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px">
-                <div style="background:rgba(0,0,0,0.2); padding:10px; border-radius:8px; border-left:3px solid #475569"><span class="label-sm">能見度 VIS</span><div id="visVal" style="font-weight:bold; font-size:1.1rem">--</div></div>
-                <div style="background:rgba(0,0,0,0.2); padding:10px; border-radius:8px; border-left:3px solid #475569"><span class="label-sm">氣壓 QNH</span><div id="qnhVal" style="font-weight:bold; font-size:1.1rem">--</div></div>
+            <div class="info-grid">
+                <div class="info-item"><span class="label-sm" style="margin:0">能見度 VIS</span><div id="visVal" style="font-weight:bold; font-size:1.1rem">--</div></div>
+                <div class="info-item"><span class="label-sm" style="margin:0">氣壓 QNH</span><div id="qnhVal" style="font-weight:bold; font-size:1.1rem">--</div></div>
             </div>
             <div id="cloudBox" style="margin-top:8px"></div>
-            <div id="rmkBox" style="margin-top:10px; font-size:0.85rem; color:var(--accent); white-space: pre-line;"></div>
+            <div id="rmkBox" style="margin-top:10px; font-size:0.85rem; color:var(--accent); white-space: pre-line; min-height: 20px;"></div>
         </div>
-        <button onclick="transfer()" style="width:100%; padding:18px; background:var(--accent); color:#000; border:none; border-radius:12px; font-weight:bold; cursor:pointer;">傳送至計算頁面 ➔</button>
+        <button onclick="transfer()" style="width:100%; padding:18px; background:var(--accent); color:#000; border:none; border-radius:12px; font-weight:bold; cursor:pointer; margin: 10px 0 30px 0;">傳送至計算頁面 ➔</button>
     </div>
 
     <div id="tab2" class="tab-content">
@@ -108,22 +108,22 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-// 【重要修正：重新加入跑道備援數據，防止 JSON 失效導致選項錯誤】
+// 【100% 恢復：講師完整清單】
 const airportDB = {
-    "RCTP": { name: "桃園 Taoyuan", lat: 25.0797, lon: 121.2342, rwys: ["05L", "05R", "23L", "23R"] },
-    "RCSS": { name: "松山 Songshan", lat: 25.0697, lon: 121.5525, rwys: ["10", "28"] },
-    "RCKH": { name: "高雄 Kaohsiung", lat: 22.5771, lon: 120.3500, rwys: ["09", "27"] },
-    "RCMQ": { name: "台中 Taichung", lat: 24.2582, lon: 120.6203, rwys: ["18", "36"] },
-    "RCNN": { name: "台南 Tainan", lat: 22.9507, lon: 120.2058, rwys: ["18R", "36L", "18L", "36R"] },
-    "RCBS": { name: "金門 Kinmen", lat: 24.4297, lon: 118.3586, rwys: ["06", "24"] },
-    "RCQC": { name: "澎湖 Penghu", lat: 23.5681, lon: 119.6281, rwys: ["02", "20"] },
-    "VHHH": { name: "香港 Hong Kong", lat: 22.3089, lon: 113.9145, rwys: ["07L", "25R", "07R", "25L"] },
-    "VMMC": { name: "澳門 Macau", lat: 22.1495, lon: 113.5915, rwys: ["16", "34"] },
-    "WSSS": { name: "新加坡 Singapore", lat: 1.3644, lon: 103.9915, rwys: ["02L", "20R", "02C", "20C"] },
-    "RKSI": { name: "首爾仁川 Incheon", lat: 37.4602, lon: 126.4407, rwys: ["15R", "33L", "15L", "33R"] },
-    "RJTT": { name: "東京羽田 Haneda", lat: 35.5494, lon: 139.7798, rwys: ["34L", "16R", "34R", "16L"] },
-    "KJFK": { name: "紐約 JFK", lat: 40.6413, lon: -73.7781, rwys: ["04L", "22R", "13L", "31R"] },
-    "KLAX": { name: "洛杉磯 L.A.", lat: 33.9416, lon: -118.4085, rwys: ["24L", "25R", "24R", "25L"] }
+    "RCTP": { name: "桃園 Taoyuan", lat: 25.0797, lon: 121.2342 },
+    "RCSS": { name: "松山 Songshan", lat: 25.0697, lon: 121.5525 },
+    "RCKH": { name: "高雄 Kaohsiung", lat: 22.5771, lon: 120.3500 },
+    "RCMQ": { name: "台中 Taichung", lat: 24.2582, lon: 120.6203 },
+    "RCNN": { name: "台南 Tainan", lat: 22.9507, lon: 120.2058 },
+    "RCBS": { name: "金門 Kinmen", lat: 24.4297, lon: 118.3586 },
+    "RCQC": { name: "澎湖 Penghu", lat: 23.5681, lon: 119.6281 },
+    "VHHH": { name: "香港 Hong Kong", lat: 22.3089, lon: 113.9145 },
+    "VMMC": { name: "澳門 Macau", lat: 22.1495, lon: 113.5915 },
+    "WSSS": { name: "新加坡 Singapore", lat: 1.3644, lon: 103.9915 },
+    "RKSI": { name: "首爾仁川 Incheon", lat: 37.4602, lon: 126.4407 },
+    "RJTT": { name: "東京羽田 Haneda", lat: 35.5494, lon: 139.7798 },
+    "KJFK": { name: "紐約 JFK", lat: 40.6413, lon: -73.7781 },
+    "KLAX": { name: "洛杉磯 L.A.", lat: 33.9416, lon: -118.4085 }
 };
 
 const groups = [
@@ -147,6 +147,8 @@ async function loadDatabases() {
             const data = await res.json();
             data.forEach(apt => { jsonNavCache[apt.code.toUpperCase()] = apt; });
         }
+    } catch (e) { console.warn("database.json 載入失敗"); }
+    try {
         const nRes = await fetch('navaids.csv');
         if (nRes.ok) {
             const nText = await nRes.text();
@@ -160,67 +162,60 @@ async function loadDatabases() {
                 }
             });
         }
-    } catch (e) { console.warn("數據庫載入跳過"); }
+    } catch (e) { console.warn("navaids.csv 載入失敗"); }
 }
 
-async function update() {
+function update() {
     const id = document.getElementById('icaoInput').value.toUpperCase(); if (!id) return;
-    document.getElementById('rawView').innerText = `正在連線 ${id}...`;
+    const ap = airportDB[id] || { name: id, lat: 25.07, lon: 121.23 };
     
-    // 使用代理 + 雙源備援
-    const proxy = "https://api.allorigins.win/raw?url=";
-    const url = encodeURIComponent(`https://aviationweather.gov/api/data/metar?ids=${id}&format=raw`);
+    document.getElementById('rawView').innerText = `正在查詢 ${id}...`;
+    document.getElementById('rmkBox').innerText = "";
 
-    try {
-        const res = await fetch(proxy + url);
-        let raw = await res.text();
-        if(raw && raw.length > 5) processMetar(id, raw.trim());
-        else {
-            const res2 = await fetch(proxy + encodeURIComponent(`https://metar.vatsim.net/metar.php?id=${id}`));
-            const raw2 = await res2.text();
-            if(raw2 && raw2.length > 5) processMetar(id, raw2.trim());
-            else throw new Error();
+    fetch(`https://metar.vatsim.net/metar.php?id=${id}&t=${Date.now()}`)
+    .then(r => r.text())
+    .then(raw => {
+        raw = raw.trim();
+        if (!raw) {
+            document.getElementById('rawView').innerText = "數據源暫無回傳 (可能為軍用基地或站點離線)";
+            document.getElementById('visVal').innerText = "N/A";
+            document.getElementById('qnhVal').innerText = "N/A";
+            document.getElementById('rmkBox').innerText = "提示：此機場 (如 RCPO, RCBS) 之 METAR 數據在民用系統中極不穩定。";
+            return;
         }
-    } catch (e) {
-        document.getElementById('rawView').innerHTML = `<span style="color:var(--red)">自動查詢失敗。請確認網路或點擊下方手動輸入。</span>`;
-    }
-}
+        document.getElementById('rawView').innerText = raw;
+        
+        const wMatch = raw.match(/(VRB|\d{3})(\d{2,3})(G\d{2,3})?KT/);
+        let dir = 0, spd = 0; if (wMatch) { dir = wMatch[1]==="VRB"?0:parseInt(wMatch[1]); spd = parseInt(wMatch[2]); }
+        const qMatch = raw.match(/[QA](\d{4})/);
+        document.getElementById('qnhVal').innerText = qnhMatch ? qnhMatch[0] : "N/A";
+        
+        if (raw.includes("CAVOK")) { document.getElementById('visVal').innerText = "10km+ (CAVOK)"; }
+        else { const visMatch = raw.match(/\b\d{4}\b/); document.getElementById('visVal').innerText = visMatch ? (visMatch[0]==="9999"?"10km+":visMatch[0]+"m") : "N/A"; }
 
-function processMetar(id, raw) {
-    document.getElementById('rawView').innerText = raw;
-    const wMatch = raw.match(/(VRB|\d{3})(\d{2,3})(G\d{2,3})?KT/);
-    let dir = 0, spd = 0; if (wMatch) { dir = wMatch[1]==="VRB"?0:parseInt(wMatch[1]); spd = parseInt(wMatch[2]); }
-    const qMatch = raw.match(/[QA](\d{4})/);
-    document.getElementById('qnhVal').innerText = qMatch ? qMatch[0] : "N/A";
-    if (raw.includes("CAVOK")) { document.getElementById('visVal').innerText = "10km+ (CAVOK)"; }
-    else { const visMatch = raw.match(/\b\d{4}\b/); document.getElementById('visVal').innerText = visMatch ? (visMatch[0]==="9999"?"10km+":visMatch[0]+"m") : "N/A"; }
-    let d = []; if(raw.includes("NOSIG")) d.push("• NOSIG (天氣穩定)"); if(raw.includes("CAVOK")) d.push("• CAVOK (良好)");
-    document.getElementById('rmkBox').innerText = d.join('\n') || "解譯完成。";
+        let d = []; if(raw.includes("NOSIG")) d.push("• NOSIG (天氣穩定)"); if(raw.includes("CAVOK")) d.push("• CAVOK (能見良好)"); if(raw.includes("TS")) d.push("• 有雷暴風險");
+        document.getElementById('rmkBox').innerText = d.join('\n') || "無顯著天氣現象";
 
-    // 跑道匹配邏輯：JSON 優先，備援次之
-    const aptJson = jsonNavCache[id];
-    const rwyList = (aptJson && aptJson.runways) ? aptJson.runways : (airportDB[id] ? airportDB[id].rwys : ["18", "36"]);
-    let best = "--", minD = 180;
-    rwyList.forEach(r => {
-        const ils = (aptJson && aptJson.ils_data) ? (aptJson.ils_data[r] || aptJson.ils_data[r.replace(/\D/g,"")]) : null;
-        const hdg = ils ? parseInt(ils.crs) : parseInt(r)*10;
-        let diff = Math.abs(dir - hdg); if(diff > 180) diff = 360 - diff;
-        if(diff < minD) { minD = diff; best = r; }
-    });
-    currentData = { id, dir, spd, best };
-    const ap = airportDB[id] || { lat: 25.07, lon: 121.23 };
-    map.setView([ap.lat, ap.lon], 14); marker.setLatLng([ap.lat, ap.lon]);
-}
-
-function promptManualMetar() {
-    const manual = prompt("請輸入 METAR 電碼：", "RCSS 01010KT 9999 FEW020 25/20 Q1012");
-    if(manual) processMetar(document.getElementById('icaoInput').value.toUpperCase() || "RCSS", manual);
+        let best = "--", minD = 180;
+        const aptJson = jsonNavCache[id];
+        const rwyList = (aptJson && aptJson.runways) ? aptJson.runways : ["18", "36"];
+        rwyList.forEach(r => {
+            const ils = (aptJson && aptJson.ils_data) ? (aptJson.ils_data[r] || aptJson.ils_data[r.replace(/\D/g,"")]) : null;
+            const hdg = ils ? parseInt(ils.crs) : parseInt(r)*10;
+            let diff = Math.abs(dir - hdg); if(diff > 180) diff = 360 - diff;
+            if(diff < minD) { minD = diff; best = r; }
+        });
+        currentData = { id, dir, spd, best };
+        map.setView([ap.lat, ap.lon], 14);
+    })
+    .catch(() => { document.getElementById('rawView').innerText = "連線失敗，請檢查網路。"; });
 }
 
 function refreshTab2() {
     if(!currentData) return; 
     const r = document.getElementById('tab2Rwy').value, id = currentData.id;
     const tas = parseInt(document.getElementById('tasInput').value) || 90;
+    
     const aptJson = jsonNavCache[id];
     let ils = null, magH = parseInt(r)*10;
     if (aptJson && aptJson.ils_data) {
@@ -228,7 +223,7 @@ function refreshTab2() {
         if (ils) magH = parseInt(ils.crs);
     }
     
-    // 指南針校正
+    /* 跑道桿旋轉邏輯修正：Landing Runway (r) 指向 magH */
     document.getElementById('rwyBar').style.transform = `translate(-50%, -50%) rotate(${magH-90}deg)`;
     document.getElementById('n1').innerText = r; 
     document.getElementById('n2').innerText = (parseInt(r)>18 ? (parseInt(r)-18).toString().padStart(2,'0') : (parseInt(r)+18).toString().padStart(2,'0'));
@@ -243,23 +238,36 @@ function refreshTab2() {
     }); 
     document.getElementById('wcaList').innerHTML = h;
 
-    // 表格對齊區隔
-    let navH = "";
-    if (ils) navH += `<tr><td class="col-type">ILS</td><td class="col-ident val">${ils.ident}</td><td class="col-freq val">${ils.freq} <span class="ch">${mhzToTacan(ils.freq)}</span></td></tr>`;
-    else navH += `<tr><td class="col-type">ILS</td><td class="col-ident">N/A</td><td class="col-freq">N/A</td></tr>`;
-    const v = csvVorCache[id];
-    if (v) navH += `<tr><td class="col-type">VOR/TCN</td><td class="col-ident val">${v.ident}</td><td class="col-freq val">${v.freq} <span class="ch">${mhzToTacan(v.freq)}</span></td></tr>`;
-    else navH += `<tr><td class="col-type">VOR/TCN</td><td class="col-ident">N/A</td><td class="col-freq">N/A</td></tr>`;
-    navH += `<tr><td class="col-type">COURSE</td><td colspan="2" class="col-freq val">${magH}°</td></tr>`;
-    document.getElementById('navDataTable').innerHTML = navH;
+    /* 導航資料區隔顯示與對齊 */
+    let navContent = "";
+    // ILS Row
+    if (ils) {
+        navContent += `<tr><td class="col-type">ILS</td><td class="col-ident val">${ils.ident}</td><td class="col-freq val">${ils.freq} <span class="ch">${mhzToTacan(ils.freq)}</span></td></tr>`;
+    } else {
+        navContent += `<tr><td class="col-type">ILS</td><td class="col-ident">N/A</td><td class="col-freq">N/A</td></tr>`;
+    }
+    // VOR/TCN Row
+    const vor = csvVorCache[id];
+    if (vor) {
+        navContent += `<tr><td class="col-type">VOR/TCN</td><td class="col-ident val">${vor.ident}</td><td class="col-freq val">${vor.freq} <span class="ch">${mhzToTacan(vor.freq)}</span></td></tr>`;
+    } else {
+        navContent += `<tr><td class="col-type">VOR/TCN</td><td class="col-ident">N/A</td><td class="col-freq">N/A</td></tr>`;
+    }
+    // Course Row
+    navContent += `<tr><td class="col-type">COURSE</td><td colspan="2" class="col-freq val">${magH}°</td></tr>`;
+    
+    document.getElementById('navDataTable').innerHTML = navContent;
 }
 
 function transfer() {
     if(!currentData) return; const s = document.getElementById('tab2Rwy'); s.innerHTML = "";
     const aptJson = jsonNavCache[currentData.id];
-    // 重要：如果讀不到 JSON，改從 airportDB 拿跑道
-    const rwyList = (aptJson && aptJson.runways) ? aptJson.runways : (airportDB[currentData.id] ? airportDB[currentData.id].rwys : ["18", "36"]);
-    rwyList.forEach(r => { let o = new Option("RWY " + r, r); if(r === currentData.best) o.selected = true; s.add(o); });
+    const rwyList = (aptJson && aptJson.runways) ? aptJson.runways : ["18", "36"];
+    rwyList.forEach(r => {
+        let o = new Option("RWY " + r, r);
+        if(r === currentData.best) o.selected = true;
+        s.add(o);
+    });
     refreshTab2(); switchTab(2);
 }
 
