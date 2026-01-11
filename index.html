@@ -18,7 +18,7 @@
         .label-sm { font-size: 0.7rem; color: var(--dim); text-transform: uppercase; font-weight: bold; margin-bottom: 8px; display: block; }
         .raw-text { font-family: 'Consolas', monospace; color: var(--green); font-size: 0.85rem; line-height: 1.4; background: #000; padding: 12px; border-radius: 6px; border-left: 4px solid var(--green); margin-top: 8px; white-space: pre-wrap; word-break: break-all; min-height: 40px; }
         .compass-wrap { position: relative; width: 260px; height: 260px; margin: 15px auto; border-radius: 50%; background: #1a365d; border: 2px solid #334155; }
-        .rwy-bar { position: absolute; top: 50%; left: 50%; width: 160px; height: 20px; background: #111; border: 1.5px solid #fff; transform: translate(-50%, -50%); z-index: 10; display: flex; justify-content: space-between; align-items: center; padding: 0 10px; border-radius: 3px; transition: transform 0.6s ease; }
+        .rwy-bar { position: absolute; top: 50%; left: 50%; width: 160px; height: 20px; background: #111; border: 1.5px solid #fff; transform: translate(-50%, -50%); z-index: 10; display: flex; justify-content: space-between; align-items: center; padding: 0 10px; border-radius: 3px; transition: transform 0.6s ease; }  
         .rwy-num { color: white; font-size: 11px; font-weight: bold; font-family: monospace; display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; transition: transform 0.6s ease; }
         .wind-ptr { position: absolute; top: 50%; left: 50%; width: 0; height: 0; transform-origin: center center; z-index: 20; transition: transform 0.8s ease; }
         #map { height: 260px; border-radius: 12px; margin-top: 10px; background: #111; border: 1px solid #444; }
@@ -28,15 +28,8 @@
         select, .tas-input { width: 100%; padding: 14px; background: #334155; color: white; border: none; border-radius: 8px; font-size: 1rem; box-sizing: border-box; }
         .nav-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; table-layout: fixed; }
         .nav-table th, .nav-table td { padding: 10px 5px; border-bottom: 1px solid #334151; overflow: hidden; white-space: nowrap; }
-        .nav-table .col-type { width: 28%; text-align: left; font-weight: bold; color: var(--dim); }
-        .nav-table .col-ident { width: 22%; text-align: center; }
-        .nav-table .col-freq { width: 50%; text-align: right; }
-        .nav-table .val { color: var(--accent); font-weight: bold; font-family: 'Consolas', monospace; }
-        .nav-table .ch { color: var(--warn); font-size: 0.85rem; }
         .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
         .info-item { background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; border-left: 3px solid #475569; }
-
-        /* 【補上：雲層解碼樣式】 */
         .cloud-item { display: flex; justify-content: space-between; background: rgba(56, 189, 248, 0.1); padding: 8px 12px; border-radius: 8px; border-left: 4px solid var(--accent); margin-bottom: 4px; font-size: 0.9rem; }
     </style>
 </head>
@@ -50,7 +43,7 @@
         <div class="card">
             <span class="label-sm">ICAO 手動輸入 / 選取</span>
             <div class="input-group">
-                <input type="text" id="icaoInput" placeholder="例如: RCHN" maxlength="4">
+                <input type="text" id="icaoInput" placeholder="例如: RCPO" maxlength="4">
                 <button onclick="manualUpdate()">查詢</button>
             </div>
             <select id="apSelect" onchange="document.getElementById('icaoInput').value=this.value; update()"></select>
@@ -82,10 +75,7 @@
         <div class="card" style="text-align:center">
             <div class="compass-wrap">
                 <svg width="260" height="260" viewBox="0 0 200 200" id="compSvg"></svg>
-                <div id="rwyBar" class="rwy-bar">
-                    <span id="n1" class="rwy-num">--</span>
-                    <span id="n2" class="rwy-num">--</span>
-                </div>
+                <div id="rwyBar" class="rwy-bar"><span id="n1" class="rwy-num">--</span><span id="n2" class="rwy-num">--</span></div>
                 <div id="windPtr" class="wind-ptr"><svg width="24" height="30" viewBox="0 0 24 30" style="position:absolute; top:-125px; left:-12px;"><path d="M12 30 L24 5 L12 12 L0 5 Z" fill="white" /></svg></div>
             </div>
         </div>
@@ -202,14 +192,39 @@ function update() {
             if (raw.includes("CAVOK")) { vis = "10km+ (CAVOK)"; }
             else { const visMatch = raw.match(/\b\d{4}\b/); vis = visMatch ? (visMatch[0]==="9999"?"10km+":visMatch[0]+"m") : "N/A"; }
             
-            // 【補回：雲層解碼邏輯】
             const cloudRegex = /(FEW|SCT|BKN|OVC|VV)(\d{3})/g;
             let cMatch, cloudsHtml = "";
             while ((cMatch = cloudRegex.exec(raw)) !== null) {
                 cloudsHtml += `<div class="cloud-item"><span><b>${cMatch[1]}</b></span><span>${parseInt(cMatch[2])*100} ft</span></div>`;
             }
             document.getElementById('cloudBox').innerHTML = cloudsHtml || "Sky Clear / NSC";
-            rmk = (raw.includes("NOSIG") ? "• NOSIG (穩定)\n" : "") + (raw.includes("TS") ? "• 有雷暴風險\n" : "") || "解譯完成。";
+            
+            // 【進階：RMK 精確解析】
+            let rmkArr = [];
+            if(raw.includes("NOSIG")) rmkArr.push("• NOSIG (天氣穩定)");
+            if(raw.includes("TS")) rmkArr.push("• 有雷暴風險");
+            
+            // SLP 解析
+            const slpMatch = raw.match(/SLP(\d{3})/);
+            if(slpMatch) {
+                const val = slpMatch[1];
+                const slpReal = (parseInt(val[0]) < 6 ? "10"+val : "9"+val).slice(0,4)+"."+val[2];
+                rmkArr.push(`• 海平面氣壓 (SLP): ${slpReal} hPa`);
+            }
+            
+            // T 精確溫露點解析 (如 T01501033)
+            const tMatch = raw.match(/T(\d)(\d{3})(\d)(\d{3})/);
+            if(tMatch) {
+                const tempSign = tMatch[1]==="0"?"":"-";
+                const tempVal = (parseInt(tMatch[2])/10).toFixed(1);
+                const dewSign = tMatch[3]==="0"?"":"-";
+                const dewVal = (parseInt(tMatch[4])/10).toFixed(1);
+                rmkArr.push(`• 精確溫度: ${tempSign}${tempVal}°C / 露點: ${dewSign}${dewVal}°C`);
+            }
+            
+            if(raw.includes("$")) rmkArr.push("• 系統維修標記 ($)");
+            
+            rmk = rmkArr.join('\n') || "解譯完成。";
         }
         document.getElementById('visVal').innerText = vis; document.getElementById('qnhVal').innerText = qnh; document.getElementById('rmkBox').innerText = rmk;
         let best = "--", minD = 180;
