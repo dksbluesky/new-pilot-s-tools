@@ -17,23 +17,25 @@
         .card { background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 10px 15px rgba(0,0,0,0.3); }
         .label-sm { font-size: 0.7rem; color: var(--dim); text-transform: uppercase; font-weight: bold; margin-bottom: 8px; display: block; }
         .raw-text { font-family: 'Consolas', monospace; color: var(--green); font-size: 0.85rem; line-height: 1.4; background: #000; padding: 12px; border-radius: 6px; border-left: 4px solid var(--green); margin-top: 8px; white-space: pre-wrap; word-break: break-all; min-height: 40px; }
+        
         .compass-wrap { position: relative; width: 260px; height: 260px; margin: 15px auto; border-radius: 50%; background: #1a365d; border: 2px solid #334155; }
         .rwy-bar { position: absolute; top: 50%; left: 50%; width: 160px; height: 20px; background: #111; border: 1.5px solid #fff; transform: translate(-50%, -50%); z-index: 10; display: flex; justify-content: space-between; align-items: center; padding: 0 10px; border-radius: 3px; transition: transform 0.6s ease; }
         .rwy-num { color: white; font-size: 11px; font-weight: bold; font-family: monospace; display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; transition: transform 0.6s ease; }
+        
         .wind-ptr { position: absolute; top: 50%; left: 50%; width: 0; height: 0; transform-origin: center center; z-index: 20; transition: transform 0.8s ease; }
+        
         #map { height: 260px; border-radius: 12px; margin-top: 10px; background: #111; border: 1px solid #444; }
         .input-group { display: flex; gap: 8px; margin-bottom: 10px; }
         .input-group input { flex: 1; padding: 12px; background: #334155; color: white; border: none; border-radius: 8px; font-weight: bold; text-transform: uppercase; }
         .input-group button { padding: 0 20px; background: var(--accent); color: #000; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
         select, .tas-input { width: 100%; padding: 14px; background: #334155; color: white; border: none; border-radius: 8px; font-size: 1rem; box-sizing: border-box; }
         
-        /* 【導航表格樣式修正】 */
+        /* 【導航表格樣式修正：Ident 靠右並增加間距】 */
         .nav-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; table-layout: fixed; }
         .nav-table th, .nav-table td { padding: 10px 5px; border-bottom: 1px solid #334151; overflow: hidden; white-space: nowrap; }
         .nav-table .col-type { width: 28%; text-align: left; font-weight: bold; color: var(--dim); }
-        /* 修正點：將 Ident 欄位改為靠右，並增加 12px 邊距與右側頻率拉開一點空間 */
-        .nav-table .col-ident { width: 22%; text-align: right; padding-right: 12px; }
-        .nav-table .col-freq { width: 50%; text-align: right; }
+        .nav-table .col-ident { width: 25%; text-align: right; padding-right: 15px; }
+        .nav-table .col-freq { width: 47%; text-align: right; }
         .nav-table .val { color: var(--accent); font-weight: bold; font-family: 'Consolas', monospace; }
         .nav-table .ch { color: var(--warn); font-size: 0.85rem; }
         
@@ -211,21 +213,17 @@ function update() {
             let rmkArr = [];
             if(raw.includes("NOSIG")) rmkArr.push("• NOSIG (天氣穩定)");
             if(raw.includes("TS")) rmkArr.push("• 有雷暴風險");
-            
             const slpMatch = raw.match(/SLP(\d{3})/);
             if(slpMatch) {
                 const val = slpMatch[1];
                 const slpReal = (parseInt(val[0]) < 6 ? "10"+val : "9"+val).slice(0,4)+"."+val[2];
                 rmkArr.push(`• 海平面氣壓 (SLP): ${slpReal} hPa`);
             }
-            
             const tMatch = raw.match(/T(\d)(\d{3})(\d)(\d{3})/);
             if(tMatch) {
-                const tempSign = tMatch[1]==="0"?"":"-";
-                const tempVal = (parseInt(tMatch[2])/10).toFixed(1);
-                const dewSign = tMatch[3]==="0"?"":"-";
-                const dewVal = (parseInt(tMatch[4])/10).toFixed(1);
-                rmkArr.push(`• 精確溫度: ${tempSign}${tempVal}°C / 露點: ${dewSign}${dewVal}°C`);
+                const ts = tMatch[1]==="0"?"":"-", tv = (parseInt(tMatch[2])/10).toFixed(1);
+                const ds = tMatch[3]==="0"?"":"-", dv = (parseInt(tMatch[4])/10).toFixed(1);
+                rmkArr.push(`• 精確溫度: ${ts}${tv}°C / 露點: ${ds}${dv}°C`);
             }
             if(raw.includes("$")) rmkArr.push("• 系統維修標記 ($)");
             rmk = rmkArr.join('\n') || "解譯完成。";
@@ -270,8 +268,6 @@ function refreshTab2() {
         h += `<tr><td align="left"><b>${l.n}</b></td><td>${Math.round(l.t)}°</td><td><b>${(Math.round(l.t)+Math.round(wRad*180/Math.PI)+360)%360}°</b></td><td align="right" style="color:var(--accent)">${gs}KT</td></tr>`;
     }); 
     document.getElementById('wcaList').innerHTML = h;
-    
-    // 【修改點：表格對應 CSS class col-ident 已設定靠右對齊】
     let nav = `<tr><td class="col-type">ILS</td><td class="col-ident val">${ils?ils.ident:'N/A'}</td><td class="col-freq val">${ils?ils.freq+' '+mhzToTacan(ils.freq):'N/A'}</td></tr>`;
     const vor = csvVorCache[id];
     nav += `<tr><td class="col-type">VOR/TCN</td><td class="col-ident val">${vor?vor.ident:'N/A'}</td><td class="col-freq val">${vor?vor.freq+' '+mhzToTacan(vor.freq):'N/A'}</td></tr>`;
