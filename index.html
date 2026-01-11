@@ -35,6 +35,9 @@
         .nav-table .ch { color: var(--warn); font-size: 0.85rem; }
         .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
         .info-item { background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; border-left: 3px solid #475569; }
+
+        /* 【補上：雲層解碼樣式】 */
+        .cloud-item { display: flex; justify-content: space-between; background: rgba(56, 189, 248, 0.1); padding: 8px 12px; border-radius: 8px; border-left: 4px solid var(--accent); margin-bottom: 4px; font-size: 0.9rem; }
     </style>
 </head>
 <body>
@@ -47,7 +50,7 @@
         <div class="card">
             <span class="label-sm">ICAO 手動輸入 / 選取</span>
             <div class="input-group">
-                <input type="text" id="icaoInput" placeholder="例如: RCPO" maxlength="4">
+                <input type="text" id="icaoInput" placeholder="例如: RCHN" maxlength="4">
                 <button onclick="manualUpdate()">查詢</button>
             </div>
             <select id="apSelect" onchange="document.getElementById('icaoInput').value=this.value; update()"></select>
@@ -60,6 +63,7 @@
                 <div class="info-item"><span class="label-sm" style="margin:0">能見度 VIS</span><div id="visVal" style="font-weight:bold; font-size:1.1rem">--</div></div>
                 <div class="info-item"><span class="label-sm" style="margin:0">氣壓 QNH</span><div id="qnhVal" style="font-weight:bold; font-size:1.1rem">--</div></div>
             </div>
+            <div id="cloudBox" style="margin-top:8px"></div>
             <div id="rmkBox" style="margin-top:10px; font-size:0.85rem; color:var(--accent); white-space: pre-line; min-height: 20px;"></div>
         </div>
         <button onclick="transfer()" style="width:100%; padding:18px; background:var(--accent); color:#000; border:none; border-radius:12px; font-weight:bold; cursor:pointer; margin: 10px 0 30px 0;">傳送至計算頁面 ➔</button>
@@ -78,7 +82,10 @@
         <div class="card" style="text-align:center">
             <div class="compass-wrap">
                 <svg width="260" height="260" viewBox="0 0 200 200" id="compSvg"></svg>
-                <div id="rwyBar" class="rwy-bar"><span id="n1" class="rwy-num">--</span><span id="n2" class="rwy-num">--</span></div>
+                <div id="rwyBar" class="rwy-bar">
+                    <span id="n1" class="rwy-num">--</span>
+                    <span id="n2" class="rwy-num">--</span>
+                </div>
                 <div id="windPtr" class="wind-ptr"><svg width="24" height="30" viewBox="0 0 24 30" style="position:absolute; top:-125px; left:-12px;"><path d="M12 30 L24 5 L12 12 L0 5 Z" fill="white" /></svg></div>
             </div>
         </div>
@@ -133,10 +140,7 @@ function mhzToTacan(mhz) {
 async function loadDatabases() {
     try {
         const res = await fetch('database.json');
-        if (res.ok) {
-            const data = await res.json();
-            data.forEach(apt => { jsonNavCache[apt.code.toUpperCase()] = apt; });
-        }
+        if (res.ok) { (await res.json()).forEach(apt => { jsonNavCache[apt.code.toUpperCase()] = apt; }); }
     } catch (e) { console.warn("database.json 載入失敗"); }
     try {
         const nRes = await fetch('navaids.csv');
@@ -146,16 +150,14 @@ async function loadDatabases() {
                 const c = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
                 if (c.length < 20) return;
                 const icao = c[19].toUpperCase().replace(/"/g,'').trim();
-                const type = c[4];
-                if (['TACAN','VOR','VORTAC'].some(t => type.includes(t))) {
-                    csvVorCache[icao] = { ident: c[2].replace(/"/g,''), type, freq: (parseFloat(c[5]) > 500 ? (parseFloat(c[5])/1000).toFixed(2) : parseFloat(c[5]).toFixed(2)) };
+                if (['TACAN','VOR','VORTAC'].some(t => c[4].includes(t))) {
+                    csvVorCache[icao] = { ident: c[2].replace(/"/g,''), type: c[4], freq: (parseFloat(c[5]) > 500 ? (parseFloat(c[5])/1000).toFixed(2) : parseFloat(c[5]).toFixed(2)) };
                 }
             });
         }
     } catch (e) { console.warn("navaids.csv 載入失敗"); }
 }
 
-// 【移植 v2.8 繪圖邏輯】
 function drawMapPattern(id, rwy) {
     const ap = airportDB[id]; if(!ap) return;
     const aptJson = jsonNavCache[id];
@@ -191,6 +193,7 @@ function update() {
         if (!raw || raw.includes("No METAR")) {
             document.getElementById('rawView').innerText = "數據源暫無回傳 (可能為軍用基地或站點離線)";
             rmk = "提示：此機場資料在民航系統不穩定，已載入預設座標。";
+            document.getElementById('cloudBox').innerHTML = "Sky Clear / NSC";
         } else {
             document.getElementById('rawView').innerText = raw;
             const wMatch = raw.match(/(VRB|\d{3})(\d{2,3})(G\d{2,3})?KT/);
@@ -198,6 +201,14 @@ function update() {
             const qMatch = raw.match(/[QA](\d{4})/); qnh = qMatch ? qMatch[0] : "N/A";
             if (raw.includes("CAVOK")) { vis = "10km+ (CAVOK)"; }
             else { const visMatch = raw.match(/\b\d{4}\b/); vis = visMatch ? (visMatch[0]==="9999"?"10km+":visMatch[0]+"m") : "N/A"; }
+            
+            // 【補回：雲層解碼邏輯】
+            const cloudRegex = /(FEW|SCT|BKN|OVC|VV)(\d{3})/g;
+            let cMatch, cloudsHtml = "";
+            while ((cMatch = cloudRegex.exec(raw)) !== null) {
+                cloudsHtml += `<div class="cloud-item"><span><b>${cMatch[1]}</b></span><span>${parseInt(cMatch[2])*100} ft</span></div>`;
+            }
+            document.getElementById('cloudBox').innerHTML = cloudsHtml || "Sky Clear / NSC";
             rmk = (raw.includes("NOSIG") ? "• NOSIG (穩定)\n" : "") + (raw.includes("TS") ? "• 有雷暴風險\n" : "") || "解譯完成。";
         }
         document.getElementById('visVal').innerText = vis; document.getElementById('qnhVal').innerText = qnh; document.getElementById('rmkBox').innerText = rmk;
