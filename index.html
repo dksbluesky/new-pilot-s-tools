@@ -155,7 +155,11 @@ async function loadDatabases() {
                 if (c.length < 20) return;
                 const icao = c[19].toUpperCase().replace(/"/g,'').trim();
                 if (['TACAN','VOR','VORTAC'].some(t => c[4].includes(t))) {
-                    csvVorCache[icao] = { ident: c[2].replace(/"/g,''), type: c[4], freq: (parseFloat(c[5]) > 500 ? (parseFloat(c[5])/1000).toFixed(2) : parseFloat(c[5]).toFixed(2)) };
+                    const typeRank = t => t.includes('VORTAC') ? 3 : t.includes('VOR') ? 2 : 1;
+                    const entry = { ident: c[2].replace(/"/g,''), type: c[4].replace(/"/g,''), freq: (parseFloat(c[5]) > 500 ? (parseFloat(c[5])/1000).toFixed(2) : parseFloat(c[5]).toFixed(2)) };
+                    if (!csvVorCache[icao] || typeRank(entry.type) > typeRank(csvVorCache[icao].type)) {
+                        csvVorCache[icao] = entry;
+                    }
                 }
             });
         }
@@ -273,7 +277,7 @@ function refreshTab2() {
     document.getElementById('wcaList').innerHTML = h;
     let nav = `<tr><td class="col-type">ILS</td><td class="col-ident val">${ils?ils.ident:'N/A'}</td><td class="col-freq val">${ils?ils.freq+' '+mhzToTacan(ils.freq):'N/A'}</td></tr>`;
     const vor = csvVorCache[id];
-    nav += `<tr><td class="col-type">VOR/TCN</td><td class="col-ident val">${vor?vor.ident:'N/A'}</td><td class="col-freq val">${vor?vor.freq+' '+mhzToTacan(vor.freq):'N/A'}</td></tr>`;
+    nav += `<tr><td class="col-type">${vor?vor.type:'VOR/TCN'}</td><td class="col-ident val">${vor?vor.ident:'N/A'}</td><td class="col-freq val">${vor?vor.freq+' '+mhzToTacan(vor.freq):'N/A'}</td></tr>`;
     nav += `<tr><td class="col-type">COURSE</td><td colspan="2" class="col-freq val">${magH}°</td></tr>`;
     document.getElementById('navDataTable').innerHTML = nav;
     drawMapPattern(id, r);
