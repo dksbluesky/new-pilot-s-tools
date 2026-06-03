@@ -186,10 +186,6 @@ function drawMapPattern(id, rwy) {
     const ap = airportDB[id]; if(!ap) return;
     const aptJson = jsonNavCache[id];
     let magH = (rwyHdgDB[id] && rwyHdgDB[id][rwy] != null) ? rwyHdgDB[id][rwy] : parseInt(rwy.replace(/\D/g,'')) * 10;
-    if (aptJson && aptJson.ils_data) {
-        const ils = aptJson.ils_data[rwy] || aptJson.ils_data[rwy.replace(/\D/g,"")];
-        if (ils) magH = parseInt(ils.crs);
-    }
     const s = trafficSide === 'L' ? -1 : 1;
     const latF = 1 / 60, lonF = latF / Math.cos(ap.lat * Math.PI / 180);
     const toR = Math.PI / 180;
@@ -255,8 +251,7 @@ function update() {
         let best = "--", minD = 180;
         const aptJson = jsonNavCache[id]; const rwyList = (aptJson && aptJson.runways) ? aptJson.runways : (ap.runways || ["18", "36"]);
         rwyList.forEach(r => {
-            const ils = (aptJson && aptJson.ils_data) ? (aptJson.ils_data[r] || aptJson.ils_data[r.replace(/\D/g,"")]) : null;
-            const hdg = ils ? parseInt(ils.crs) : parseInt(r.replace(/\D/g,""))*10;
+            const hdg = (rwyHdgDB[id] && rwyHdgDB[id][r] != null) ? rwyHdgDB[id][r] : parseInt(r.replace(/\D/g,""))*10;
             let diff = Math.abs(dir - hdg); if(diff > 180) diff = 360 - diff;
             if(diff < minD) { minD = diff; best = r; }
         });
@@ -272,10 +267,12 @@ function refreshTab2() {
     const r = document.getElementById('tab2Rwy').value, id = currentData.id;
     const tas = parseInt(document.getElementById('tasInput').value) || 90;
     const aptJson = jsonNavCache[id];
-    let ils = null, magH = (rwyHdgDB[id] && rwyHdgDB[id][r] != null) ? rwyHdgDB[id][r] : parseInt(r.replace(/\D/g,""))*10;
+    let ils = null;
+    let magH = (rwyHdgDB[id] && rwyHdgDB[id][r] != null) ? rwyHdgDB[id][r] : parseInt(r.replace(/\D/g,""))*10;
+    let crs = magH;
     if (aptJson && aptJson.ils_data) {
         ils = aptJson.ils_data[r] || aptJson.ils_data[r.replace(/\D/g,"")];
-        if (ils) magH = parseInt(ils.crs);
+        if (ils) crs = parseInt(ils.crs);
     }
     const barRot = magH - 90; 
     document.getElementById('rwyBar').style.transform = `translate(-50%, -50%) rotate(${barRot}deg)`;
@@ -294,7 +291,7 @@ function refreshTab2() {
     let nav = `<tr><td class="col-type">ILS</td><td class="col-ident val">${ils?ils.ident:'N/A'}</td><td class="col-freq val">${ils?ils.freq+' '+mhzToTacan(ils.freq):'N/A'}</td></tr>`;
     const vor = csvVorCache[id];
     nav += `<tr><td class="col-type">${vor?vor.type:'VOR/TCN'}</td><td class="col-ident val">${vor?vor.ident:'N/A'}</td><td class="col-freq val">${vor?vor.freq+' '+mhzToTacan(vor.freq):'N/A'}</td></tr>`;
-    nav += `<tr><td class="col-type">COURSE</td><td colspan="2" class="col-freq val">${magH}°</td></tr>`;
+    nav += `<tr><td class="col-type">COURSE</td><td colspan="2" class="col-freq val">${crs.toString().padStart(3,'0')}°</td></tr>`;
     document.getElementById('navDataTable').innerHTML = nav;
     drawMapPattern(id, r);
 }
