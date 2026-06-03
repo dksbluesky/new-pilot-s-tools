@@ -133,7 +133,7 @@ const groups = [
     { label: "🇺🇸 歐美 Global", ids: ["KJFK", "KLAX"] }
 ];
 
-let jsonNavCache = {}, csvVorCache = {}, currentData = null, trafficSide = 'L', map, marker, patternOverlay;
+let jsonNavCache = {}, csvVorCache = {}, rwyHdgDB = {}, currentData = null, trafficSide = 'L', map, marker, patternOverlay;
 
 function mhzToTacan(mhz) {
     const f = parseFloat(mhz); if (isNaN(f)) return "";
@@ -164,12 +164,28 @@ async function loadDatabases() {
             });
         }
     } catch (e) { console.warn("navaids.csv 載入失敗"); }
+    try {
+        const rRes = await fetch('runways.csv');
+        if (rRes.ok) {
+            const rText = await rRes.text();
+            rText.split('\n').slice(1).forEach(line => {
+                const c = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+                if (c.length < 19) return;
+                const icao = c[2].replace(/"/g,'').toUpperCase().trim();
+                if (!rwyHdgDB[icao]) rwyHdgDB[icao] = {};
+                [{id: c[8], hdg: c[12]}, {id: c[14], hdg: c[18]}].forEach(end => {
+                    const rId = end.id.replace(/"/g,'').trim(); if (!rId) return;
+                    rwyHdgDB[icao][rId] = end.hdg ? Math.round(parseFloat(end.hdg.replace(/"/g,''))) : parseInt(rId.replace(/\D/g,'')) * 10;
+                });
+            });
+        }
+    } catch (e) { console.warn("runways.csv 載入失敗"); }
 }
 
 function drawMapPattern(id, rwy) {
     const ap = airportDB[id]; if(!ap) return;
     const aptJson = jsonNavCache[id];
-    let magH = parseInt(rwy.replace(/\D/g,'')) * 10;
+    let magH = (rwyHdgDB[id] && rwyHdgDB[id][rwy] != null) ? rwyHdgDB[id][rwy] : parseInt(rwy.replace(/\D/g,'')) * 10;
     if (aptJson && aptJson.ils_data) {
         const ils = aptJson.ils_data[rwy] || aptJson.ils_data[rwy.replace(/\D/g,"")];
         if (ils) magH = parseInt(ils.crs);
@@ -256,7 +272,7 @@ function refreshTab2() {
     const r = document.getElementById('tab2Rwy').value, id = currentData.id;
     const tas = parseInt(document.getElementById('tasInput').value) || 90;
     const aptJson = jsonNavCache[id];
-    let ils = null, magH = parseInt(r.replace(/\D/g,""))*10;
+    let ils = null, magH = (rwyHdgDB[id] && rwyHdgDB[id][r] != null) ? rwyHdgDB[id][r] : parseInt(r.replace(/\D/g,""))*10;
     if (aptJson && aptJson.ils_data) {
         ils = aptJson.ils_data[r] || aptJson.ils_data[r.replace(/\D/g,"")];
         if (ils) magH = parseInt(ils.crs);
