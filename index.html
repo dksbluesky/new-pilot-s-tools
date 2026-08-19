@@ -3,10 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0f172a">
     <title>Pocket METAR Pro - Instructor Edition v3.9</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="apple-touch-icon" href="ILS.png?v=1">
-    <link rel="icon" sizes="192x192" href="ILS.png?v=1">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="icon" sizes="192x192" href="icons/icon-192.png">
     <link rel="shortcut icon" href="ILS.png?v=1">
     <style>
         :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; --text: #f8fafc; --dim: #94a3b8; --green: #4ade80; --red: #fb7185; --warn: #facc15; }
@@ -329,6 +331,11 @@ function init() {
     update(); setSide('L');
 }
 window.onload = init;
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch((error) => console.warn('Service worker registration failed:', error));
+}
 </script>
 </body>
 </html>
